@@ -2044,9 +2044,10 @@ namespace System
                 // We may find a userInfo and the port when parsing an authority
                 // Also we may find a registry based authority.
                 // We must ensure that known schemes do use a server-based authority
+                int charsRemoved = 0;
                 {
                     ParsingError err = ParsingError.None;
-                    idx = CheckAuthorityHelper(pUriString, idx, length, ref err, ref _flags, _syntax, ref newHost);
+                    idx = CheckAuthorityHelper(pUriString, idx, length, ref err, ref _flags, _syntax, ref newHost, ref charsRemoved);
                     if (err != ParsingError.None)
                         return err;
 
@@ -2067,18 +2068,22 @@ namespace System
                     }
                 }
 
-                // The Path (or Port) parsing index is reloaded on demand in CreateUriInfo when accessing a Uri property
-                _flags |= (Flags)idx;
+                if (IriParsing && newHost != null)
+                {
+                    // The Path (or Port) parsing index is reloaded on demand in CreateUriInfo when accessing a Uri property
+                    _flags |= (Flags)(idx - charsRemoved);
+                    // we have a new host!
+                    _string = newHost;
+                }
+                else
+                {
+                    // The Path (or Port) parsing index is reloaded on demand in CreateUriInfo when accessing a Uri property
+                    _flags |= (Flags)idx;
+                }
 
                 // The rest of the string will be parsed on demand
                 // The Host/Authority is all checked, the type is known but the host value string
                 // is not created/canonicalized at this point.
-            }
-
-            if (IriParsing && newHost != null)
-            {
-                // we have a new host!
-                _string = newHost;
             }
 
             return ParsingError.None;
@@ -2471,7 +2476,8 @@ namespace System
                 fixed (char* pHost = host)
                 {
                     string? newHost = null;
-                    if (CheckAuthorityHelper(pHost, 0, host.Length, ref err, ref flags, _syntax, ref newHost) !=
+                    int charsRemoved = 0;
+                    if (CheckAuthorityHelper(pHost, 0, host.Length, ref err, ref flags, _syntax, ref newHost, ref charsRemoved) !=
                         host.Length)
                     {
                         // We cannot parse the entire host string
@@ -3889,7 +3895,7 @@ namespace System
         //
         // Must be called in the ctor only
         private unsafe int CheckAuthorityHelper(char* pString, int idx, int length,
-            ref ParsingError err, ref Flags flags, UriParser syntax, ref string? newHost)
+            ref ParsingError err, ref Flags flags, UriParser syntax, ref string? newHost, ref int charsRemoved)
         {
             Debug.Assert((_flags & Flags.Debug_LeftConstructor) == 0 || (!_syntax.IsSimple && Monitor.IsEntered(_info)));
 
@@ -4023,7 +4029,7 @@ namespace System
                                             StaticNotAny(flags, Flags.ImplicitFile)))
             {
                 CheckAuthorityHelperHandleDnsIri(pString, start, end, hasUnicode,
-                    ref flags, ref justNormalized, ref newHost, ref err);
+                    ref flags, ref justNormalized, ref newHost, ref err, ref charsRemoved);
             }
             else if ((syntaxFlags & UriSyntaxFlags.AllowUncHost) != 0)
             {
@@ -4217,7 +4223,7 @@ namespace System
 
         private unsafe void CheckAuthorityHelperHandleDnsIri(char* pString, int start, int end,
             bool hasUnicode, ref Flags flags,
-            ref bool justNormalized, ref string? newHost, ref ParsingError err)
+            ref bool justNormalized, ref string? newHost, ref ParsingError err, ref int charsRemoved)
         {
             // comes here only if host has unicode chars and iri is on or idn is allowed
 
@@ -4225,10 +4231,14 @@ namespace System
 
             if (hasUnicode)
             {
-                string temp = UriHelper.StripBidiControlCharacters(new ReadOnlySpan<char>(pString + start, end - start));
+                int charCountBefore = end - start;
+                string temp = UriHelper.StripBidiControlCharacters(new ReadOnlySpan<char>(pString + start, charCountBefore));
                 try
                 {
-                    newHost += temp.Normalize(NormalizationForm.FormC);
+                    int charCountAfter = temp.Length;
+                    temp = temp.Normalize(NormalizationForm.FormC);
+                    charsRemoved = charCountAfter - charCountBefore;
+                    newHost += temp;
                 }
                 catch (ArgumentException)
                 {

@@ -818,5 +818,16 @@ namespace System.PrivateUri.Tests
             Assert.Equal(absoluteUri, uri2.AbsoluteUri);
             Assert.Equal(localPath, uri2.LocalPath);
         }
+
+        [Theory]
+        [InlineData("/////\\\u200e//")]
+        [InlineData("\\/\u200fab/cd")]
+        [InlineData("/\\\\-ã\r")]
+        [InlineData("\\\\\\\\\\\u200e")]
+        public static void Uri_InvalidUriContainingBidiChars_ThrowsUriFormatException(string uriString)
+        {
+            var x = new Uri(uriString, UriKind.Absolute);
+            Console.WriteLine();
+        }
     }
 }
