@@ -4240,9 +4240,9 @@ namespace System
                 string temp = UriHelper.StripBidiControlCharacters(new ReadOnlySpan<char>(pString + start, charCountBefore));
                 try
                 {
-                    int charCountAfter = temp.Length;
                     temp = temp.Normalize(NormalizationForm.FormC);
-                    charsRemoved = charCountAfter - charCountBefore;
+                    int charCountAfter = temp.Length;
+                    charsRemoved = charCountBefore - charCountAfter;
                     newHost += temp;
                 }
                 catch (ArgumentException)
