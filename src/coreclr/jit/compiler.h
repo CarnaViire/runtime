@@ -5046,6 +5046,10 @@ public:
     // Convert a BYTE which represents the VM's CorInfoGCtype to the JIT's var_types
     var_types getJitGCType(BYTE gcType);
 
+    // Returns true if the provided type should be treated as a primitive type
+    // for the unmanaged calling conventions.
+    bool isNativePrimitiveStructType(CORINFO_CLASS_HANDLE clsHnd);
+
     enum structPassingKind
     {
         SPK_Unknown,       // Invalid value, never returned
@@ -5531,10 +5535,14 @@ protected:
 
     void fgAdjustForAddressExposedOrWrittenThis();
 
-    bool                      fgProfileData_ILSizeMismatch;
-    ICorJitInfo::BlockCounts* fgBlockCounts;
-    UINT32                    fgBlockCountsCount;
-    UINT32                    fgNumProfileRuns;
+    bool                                   fgProfileData_ILSizeMismatch;
+    ICorJitInfo::PgoInstrumentationSchema* fgPgoSchema;
+    BYTE*                                  fgPgoData;
+    UINT32                                 fgPgoSchemaCount;
+    HRESULT                                fgPgoQueryResult;
+    UINT32                                 fgNumProfileRuns;
+    UINT32                                 fgPgoBlockCounts;
+    UINT32                                 fgPgoClassProfiles;
 
     unsigned fgStressBBProf()
     {
@@ -5556,7 +5564,9 @@ protected:
     bool fgHaveProfileData();
     void fgComputeProfileScale();
     bool fgGetProfileWeightForBasicBlock(IL_OFFSET offset, BasicBlock::weight_t* weight);
-    void fgInstrumentMethod();
+    PhaseStatus fgInstrumentMethod();
+    PhaseStatus fgIncorporateProfileData();
+    void        fgIncorporateBlockCounts();
 
 public:
     // fgIsUsingProfileWeights - returns true if we have real profile data for this method
@@ -5581,6 +5591,7 @@ public:
 #endif
 
 public:
+    Statement* fgNewStmtAtBeg(BasicBlock* block, GenTree* tree);
     void fgInsertStmtAtEnd(BasicBlock* block, Statement* stmt);
     Statement* fgNewStmtAtEnd(BasicBlock* block, GenTree* tree);
     Statement* fgNewStmtNearEnd(BasicBlock* block, GenTree* tree);
@@ -5588,8 +5599,6 @@ public:
 private:
     void fgInsertStmtNearEnd(BasicBlock* block, Statement* stmt);
     void fgInsertStmtAtBeg(BasicBlock* block, Statement* stmt);
-    Statement* fgNewStmtAtBeg(BasicBlock* block, GenTree* tree);
-
     void fgInsertStmtAfter(BasicBlock* block, Statement* insertionPoint, Statement* stmt);
 
 public:
@@ -6864,6 +6873,8 @@ public:
     //
     PhaseStatus optRedundantBranches();
     bool optRedundantBranch(BasicBlock* const block);
+    bool optJumpThread(BasicBlock* const block, BasicBlock* const domBlock);
+    bool optReachable(BasicBlock* const fromBlock, BasicBlock* const toBlock);
 
 #if ASSERTION_PROP
     /**************************************************************************
@@ -8047,6 +8058,21 @@ private:
 #endif
     }
 
+    bool isIntrinsicType(CORINFO_CLASS_HANDLE clsHnd)
+    {
+        return info.compCompHnd->isIntrinsicType(clsHnd);
+    }
+
+    const char* getClassNameFromMetadata(CORINFO_CLASS_HANDLE cls, const char** namespaceName)
+    {
+        return info.compCompHnd->getClassNameFromMetadata(cls, namespaceName);
+    }
+
+    CORINFO_CLASS_HANDLE getTypeInstantiationArgument(CORINFO_CLASS_HANDLE cls, unsigned index)
+    {
+        return info.compCompHnd->getTypeInstantiationArgument(cls, index);
+    }
+
 #ifdef FEATURE_SIMD
 
     // Should we support SIMD intrinsics?
@@ -8263,21 +8289,6 @@ private:
             return strcmp(namespaceName, "System.Numerics") == 0;
         }
         return false;
-    }
-
-    bool isIntrinsicType(CORINFO_CLASS_HANDLE clsHnd)
-    {
-        return info.compCompHnd->isIntrinsicType(clsHnd);
-    }
-
-    const char* getClassNameFromMetadata(CORINFO_CLASS_HANDLE cls, const char** namespaceName)
-    {
-        return info.compCompHnd->getClassNameFromMetadata(cls, namespaceName);
-    }
-
-    CORINFO_CLASS_HANDLE getTypeInstantiationArgument(CORINFO_CLASS_HANDLE cls, unsigned index)
-    {
-        return info.compCompHnd->getTypeInstantiationArgument(cls, index);
     }
 
     bool isSIMDClass(typeInfo* pTypeInfo)
@@ -9372,6 +9383,8 @@ public:
                                       // current number of EH clauses (after additions like synchronized
         // methods and funclets, and removals like unreachable code deletion).
 
+        Target::ArgOrder compArgOrder;
+
         bool compMatchedVM; // true if the VM is "matched": either the JIT is a cross-compiler
                             // and the VM expects that, or the JIT is a "self-host" compiler
                             // (e.g., x86 hosted targeting x86) and the VM expects that.
@@ -9451,6 +9464,14 @@ public:
             return (info.compRetBuffArg != BAD_VAR_NUM);
         }
 #endif // TARGET_WINDOWS && TARGET_ARM64
+        // 4. x86 unmanaged calling conventions require the address of RetBuff to be returned in eax.
+        CLANG_FORMAT_COMMENT_ANCHOR;
+#if defined(TARGET_X86)
+        if (info.compCallConv != CorInfoCallConvExtension::Managed)
+        {
+            return (info.compRetBuffArg != BAD_VAR_NUM);
+        }
+#endif
 
         return false;
 #endif // TARGET_AMD64
