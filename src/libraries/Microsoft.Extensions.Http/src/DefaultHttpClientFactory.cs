@@ -11,27 +11,53 @@ using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.Http
 {
-    internal class TransientHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFactory
+    internal class DefaultHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFactory
     {
         private readonly IServiceProvider _services;
         private readonly IOptionsMonitor<HttpClientFactoryOptions> _optionsMonitor;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHttpMessageHandlerBuilderFilter[] _filters;
+        private readonly ServiceProviderChecker _serviceProviderChecker;
 
         // internal for tests
-        internal readonly SingletonHttpMessageHandlerCache _singletonCache;
+        internal readonly DefaultHttpMessageHandlerCache _singletonCache;
 
-        public TransientHttpClientFactory(
+        public DefaultHttpClientFactory(
             IServiceProvider services,
             IServiceScopeFactory scopeFactory,
+            ServiceProviderChecker serviceProviderChecker,
             IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor,
-            SingletonHttpMessageHandlerCache singletonCache,
+            DefaultHttpMessageHandlerCache singletonCache,
             IEnumerable<IHttpMessageHandlerBuilderFilter> filters)
         {
-            // todo: check for nulls
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+            if (scopeFactory == null)
+            {
+                throw new ArgumentNullException(nameof(scopeFactory));
+            }
+            if (serviceProviderChecker == null)
+            {
+                throw new ArgumentNullException(nameof(serviceProviderChecker));
+            }
+            if (optionsMonitor == null)
+            {
+                throw new ArgumentNullException(nameof(optionsMonitor));
+            }
+            if (singletonCache == null)
+            {
+                throw new ArgumentNullException(nameof(singletonCache));
+            }
+            if (filters == null)
+            {
+                throw new ArgumentNullException(nameof(filters));
+            }
 
             _services = services;
             _scopeFactory = scopeFactory;
+            _serviceProviderChecker = serviceProviderChecker;
             _optionsMonitor = optionsMonitor;
             _singletonCache = singletonCache;
             _filters = filters.ToArray();
@@ -74,9 +100,13 @@ namespace Microsoft.Extensions.Http
                 throw new InvalidOperationException(SR.PreserveExistingScope_SuppressHandlerScope_BothTrueIsInvalid);
             }
 
+            if (options.PreserveExistingScope && !_serviceProviderChecker.IsScoped(_services))
+            {
+                throw new Exception(); //todo
+            }
+
             if (options.PreserveExistingScope)
             {
-                // todo: check _services is scoped
                 ScopedHttpMessageHandlerCache scopedCache = _services.GetRequiredService<ScopedHttpMessageHandlerCache>();
                 return scopedCache.GetOrAdd(name, () => CreateScopedHandler(name, options));
             }
@@ -100,13 +130,13 @@ namespace Microsoft.Extensions.Http
 
             ActiveHandlerTrackingEntry entry = _singletonCache.GetOrAdd(name, () =>
                 {
+                    // Wrap the handler so we can ensure the inner handler outlives the outer handler
                     var handler = new LifetimeTrackingHttpMessageHandler(new HttpClientHandler());
                     return new ActiveHandlerTrackingEntry(name, handler, true, null, options.HandlerLifetime);
                 });
             Debug.Assert(entry.IsPrimary);
             LifetimeTrackingHttpMessageHandler primaryHandler = entry.Handler;
 
-            // todo: check _services is scoped
             HttpMessageHandlerBuilder builder = _services.GetRequiredService<HttpMessageHandlerBuilder>();
             builder.Name = name;
             ConfigureBuilder(builder, options);
@@ -116,6 +146,7 @@ namespace Microsoft.Extensions.Http
                 throw new InvalidOperationException(SR.PreserveExistingScope_CannotChangePrimaryHandler);
             }
 
+            // Wrap the handler so we can ensure the inner handler outlives HttpClient
             return new LifetimeTrackingHttpMessageHandler(builder.Build(primaryHandler));
         }
 
@@ -123,23 +154,35 @@ namespace Microsoft.Extensions.Http
         {
             Debug.Assert(!options.PreserveExistingScope);
 
-            // todo: check _services is root
-            IServiceProvider services = _services;
-            var scope = (IServiceScope)null;
-
-            if (!options.SuppressHandlerScope)
-            {
-                scope = _scopeFactory.CreateScope();
-                services = scope.ServiceProvider;
-            }
+            IServiceScope scope = null;
+            IServiceProvider services;
 
             try
             {
+                if (!options.SuppressHandlerScope)
+                {
+                    scope = _scopeFactory.CreateScope();
+                    services = scope.ServiceProvider;
+                }
+                else
+                {
+                    services = _serviceProviderChecker.RootServiceProvider;
+                }
+
                 var builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
                 builder.Name = name;
                 ConfigureBuilder(builder, options);
 
+                // Wrap the handler so we can ensure the inner handler outlives HttpClient
                 var handler = new LifetimeTrackingHttpMessageHandler(builder.Build());
+
+                // Note that we can't start the timer here. That would introduce a very very subtle race condition
+                // with very short expiry times. We need to wait until we've actually handed out the handler once
+                // to start the timer.
+                //
+                // Otherwise it would be possible that we start the timer here, immediately expire it (very short
+                // timer) and then dispose it without ever creating a client. That would be bad. It's unlikely
+                // this would happen, but we want to be sure.
                 return new ActiveHandlerTrackingEntry(name, handler, false, scope, options.HandlerLifetime);
             }
             catch

@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Logging;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Microsoft.Extensions.Http
@@ -685,7 +684,7 @@ namespace Microsoft.Extensions.Http
 
             if (isExpiryTest)
             {
-                serviceCollection.AddSingleton<SingletonHttpMessageHandlerCache, TestHttpMessageHandlerCache>(); // substitute default cache to enable await expiry
+                serviceCollection.AddSingleton<DefaultHttpMessageHandlerCache, TestHttpMessageHandlerCache>(); // substitute default cache to enable await expiry
             }
 
             var builder = registerTypedClient
@@ -722,10 +721,10 @@ namespace Microsoft.Extensions.Http
             return scopeHandler.ScopedService;
         }
 
-        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(IHttpMessageHandlerFactory factory, string name) => GetHandlerFromFactory((TransientHttpClientFactory)factory, name);
-        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(IHttpClientFactory factory, string name) => GetHandlerFromFactory((TransientHttpClientFactory)factory, name);
+        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(IHttpMessageHandlerFactory factory, string name) => GetHandlerFromFactory((DefaultHttpClientFactory)factory, name);
+        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(IHttpClientFactory factory, string name) => GetHandlerFromFactory((DefaultHttpClientFactory)factory, name);
 
-        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(TransientHttpClientFactory factory, string name)
+        private LifetimeTrackingHttpMessageHandler GetHandlerFromFactory(DefaultHttpClientFactory factory, string name)
         {
             var entry = factory._singletonCache.GetActiveEntry(name);
             if (entry != null)
@@ -762,12 +761,12 @@ namespace Microsoft.Extensions.Http
             }
         }
 
-        private static async Task WaitForExpiry(IHttpMessageHandlerFactory factory, string name) => await WaitForExpiry((TransientHttpClientFactory)factory, name);
-        private static async Task WaitForExpiry(IHttpClientFactory factory, string name) => await WaitForExpiry((TransientHttpClientFactory)factory, name);
-        private static async Task WaitForExpiry(TransientHttpClientFactory factory, string name) => await ((TestHttpMessageHandlerCache)factory._singletonCache).WaitForExpiry(name);
+        private static async Task WaitForExpiry(IHttpMessageHandlerFactory factory, string name) => await WaitForExpiry((DefaultHttpClientFactory)factory, name);
+        private static async Task WaitForExpiry(IHttpClientFactory factory, string name) => await WaitForExpiry((DefaultHttpClientFactory)factory, name);
+        private static async Task WaitForExpiry(DefaultHttpClientFactory factory, string name) => await ((TestHttpMessageHandlerCache)factory._singletonCache).WaitForExpiry(name);
 
         // allows awaiting on expiry timers
-        private class TestHttpMessageHandlerCache : SingletonHttpMessageHandlerCache
+        private class TestHttpMessageHandlerCache : DefaultHttpMessageHandlerCache
         {
             public TestHttpMessageHandlerCache(ILoggerFactory loggerFactory)
                 : base(loggerFactory)
@@ -814,11 +813,14 @@ namespace Microsoft.Extensions.Http
                     {
                         t = Task.CompletedTask;
                     }
-                    if (!ActiveEntryState.TryGetValue(entry, out var completionSource))
+                    else if (!ActiveEntryState.TryGetValue(entry, out var completionSource))
                     {
                         t = Task.CompletedTask;
                     }
-                    t = completionSource.Task;
+                    else
+                    {
+                        t = completionSource.Task;
+                    }
                 }
 
                 await t;

@@ -10,9 +10,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.Http
 {
-    internal class SingletonHttpMessageHandlerCache
+    internal class DefaultHttpMessageHandlerCache
     {
-        private static readonly TimerCallback _cleanupCallback = (s) => ((SingletonHttpMessageHandlerCache)s).CleanupTimer_Tick();
+        private static readonly TimerCallback _cleanupCallback = (s) => ((DefaultHttpMessageHandlerCache)s).CleanupTimer_Tick();
         private readonly ILogger _logger;
 
         // Default time of 10s for cleanup seems reasonable.
@@ -46,9 +46,9 @@ namespace Microsoft.Extensions.Http
         internal readonly ConcurrentQueue<ExpiredHandlerTrackingEntry> _expiredHandlers;
         private readonly TimerCallback _expiryCallback;
 
-        public SingletonHttpMessageHandlerCache(ILoggerFactory loggerFactory)
+        public DefaultHttpMessageHandlerCache(ILoggerFactory loggerFactory)
         {
-            _logger = loggerFactory.CreateLogger<SingletonHttpMessageHandlerCache>();
+            _logger = loggerFactory.CreateLogger<DefaultHttpClientFactory>();
 
             // same comparer as for named options.
             _activeHandlers = new ConcurrentDictionary<string, Lazy<ActiveHandlerTrackingEntry>>(StringComparer.Ordinal);
@@ -64,7 +64,10 @@ namespace Microsoft.Extensions.Http
         {
             var lazy = _activeHandlers.GetOrAdd(name,
                 new Lazy<ActiveHandlerTrackingEntry>(factory, LazyThreadSafetyMode.ExecutionAndPublication));
-            return lazy.Value;
+
+            ActiveHandlerTrackingEntry entry = lazy.Value;
+            StartHandlerEntryTimer(entry);
+            return entry;
         }
 
         // Internal for tests

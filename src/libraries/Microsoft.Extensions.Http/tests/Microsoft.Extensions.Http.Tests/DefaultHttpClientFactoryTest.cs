@@ -24,11 +24,14 @@ namespace Microsoft.Extensions.Http
             Services = new ServiceCollection().AddHttpClient().BuildServiceProvider();
             ScopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
             Options = Services.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>();
+            ServiceProviderChecker = Services.GetRequiredService<ServiceProviderChecker>();
         }
 
         public IServiceProvider Services { get; }
 
         public IServiceScopeFactory ScopeFactory { get; }
+
+        internal ServiceProviderChecker ServiceProviderChecker { get; }
 
         public ILoggerFactory LoggerFactory { get; } = NullLoggerFactory.Instance;
 
@@ -47,7 +50,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -71,7 +74,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -100,7 +103,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act
             using (factory.CreateClient())
@@ -126,7 +129,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act
             using (factory.CreateHandler())
@@ -147,7 +150,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act
             var client = factory.CreateClient();
@@ -167,7 +170,7 @@ namespace Microsoft.Extensions.Http
             });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act
             var client = factory.CreateClient("github");
@@ -231,7 +234,7 @@ namespace Microsoft.Extensions.Http
                 });
 
             var cache = new TestHttpMessageHandlerCache(LoggerFactory);
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, new[]
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, new[]
             {
                 filter1.Object,
                 filter2.Object,
@@ -266,7 +269,7 @@ namespace Microsoft.Extensions.Http
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act - 1 - Creating a client should add an entry to active handlers
             var client1 = factory.CreateClient("github");
@@ -312,7 +315,7 @@ namespace Microsoft.Extensions.Http
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             // Act - 1 - Creating a client should add an entry to active handlers
             var client1 = factory.CreateClient("github");
@@ -372,7 +375,7 @@ namespace Microsoft.Extensions.Http
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             var cleanupEntry = await SimulateClientUse_Factory_CleanupCycle_DisposesEligibleHandler(factory);
 
@@ -443,7 +446,7 @@ namespace Microsoft.Extensions.Http
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, ServiceProviderChecker, Options, cache, EmptyFilters);
 
             var cleanupEntry = await SimulateClientUse_Factory_CleanupCycle_DisposesLiveHandler(factory, disposeHandler);
 
@@ -525,22 +528,23 @@ namespace Microsoft.Extensions.Http
             return cleanupEntry;
         }
 
-        private class TestHttpClientFactory : TransientHttpClientFactory
+        private class TestHttpClientFactory : DefaultHttpClientFactory
         {
             internal TestHttpMessageHandlerCache _cache;
 
             public TestHttpClientFactory(
                 IServiceProvider services,
                 IServiceScopeFactory scopeFactory,
+                ServiceProviderChecker serviceProviderChecker,
                 IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor,
                 TestHttpMessageHandlerCache singletonCache,
-                IEnumerable<IHttpMessageHandlerBuilderFilter> filters) : base(services, scopeFactory, optionsMonitor, singletonCache, filters)
+                IEnumerable<IHttpMessageHandlerBuilderFilter> filters) : base(services, scopeFactory, serviceProviderChecker, optionsMonitor, singletonCache, filters)
             {
                 _cache = singletonCache;
             }
         }
 
-        private class TestHttpMessageHandlerCache : SingletonHttpMessageHandlerCache
+        private class TestHttpMessageHandlerCache : DefaultHttpMessageHandlerCache
         {
             public TestHttpMessageHandlerCache(ILoggerFactory loggerFactory)
                 : base(loggerFactory)
