@@ -114,10 +114,6 @@ namespace Microsoft.Extensions.Http
         /// Default value is `false`.
         /// </para>
         /// <para>
-        /// Configurations with <see cref="PreserveExistingScope"/> set to `true` can only be used with <see cref="IScopedHttpClientFactory"/> and <see cref="IScopedHttpMessageHandlerFactory"/>.
-        /// Configurations with <see cref="PreserveExistingScope"/> set to `false` can only be used with <see cref="IHttpClientFactory"/> and <see cref="IHttpMessageHandlerFactory"/>.
-        /// </para>
-        /// <para>
         /// Options <see cref="PreserveExistingScope"/> and <see cref="SuppressHandlerScope"/> cannot be both set to `true`.
         /// </para>
         /// <para>

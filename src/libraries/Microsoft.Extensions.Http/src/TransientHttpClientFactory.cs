@@ -15,10 +15,11 @@ namespace Microsoft.Extensions.Http
     {
         private readonly IServiceProvider _services;
         private readonly IOptionsMonitor<HttpClientFactoryOptions> _optionsMonitor;
-        private readonly SingletonHttpMessageHandlerCache _singletonCache;
-
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHttpMessageHandlerBuilderFilter[] _filters;
+
+        // internal for tests
+        internal readonly SingletonHttpMessageHandlerCache _singletonCache;
 
         public TransientHttpClientFactory(
             IServiceProvider services,

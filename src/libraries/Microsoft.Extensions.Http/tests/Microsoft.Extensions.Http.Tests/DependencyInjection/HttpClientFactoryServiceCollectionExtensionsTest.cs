@@ -924,7 +924,7 @@ namespace Microsoft.Extensions.DependencyInjection
             var handlerFactory = services.GetRequiredService<IHttpMessageHandlerFactory>();
 
             // Assert
-            Assert.Same(clientFactory, handlerFactory);
+            Assert.Same(clientFactory.GetType(), handlerFactory.GetType());
         }
 
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]

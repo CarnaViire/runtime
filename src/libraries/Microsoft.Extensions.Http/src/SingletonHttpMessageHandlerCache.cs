@@ -48,7 +48,7 @@ namespace Microsoft.Extensions.Http
 
         public SingletonHttpMessageHandlerCache(ILoggerFactory loggerFactory)
         {
-            _logger = loggerFactory.CreateLogger<DefaultHttpClientFactory>();
+            _logger = loggerFactory.CreateLogger<SingletonHttpMessageHandlerCache>();
 
             // same comparer as for named options.
             _activeHandlers = new ConcurrentDictionary<string, Lazy<ActiveHandlerTrackingEntry>>(StringComparer.Ordinal);

@@ -114,15 +114,7 @@ namespace System.Net.Http
     {
         System.Net.Http.HttpClient CreateClient(string name);
     }
-    public partial interface IScopedHttpClientFactory
-    {
-        System.Net.Http.HttpClient CreateClient(string name);
-    }
     public partial interface IHttpMessageHandlerFactory
-    {
-        System.Net.Http.HttpMessageHandler CreateHandler(string name);
-    }
-    public partial interface IScopedHttpMessageHandlerFactory
     {
         System.Net.Http.HttpMessageHandler CreateHandler(string name);
     }

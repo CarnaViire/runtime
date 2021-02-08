@@ -46,7 +46,8 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -69,7 +70,8 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -97,7 +99,8 @@ namespace Microsoft.Extensions.Http
                 b.PrimaryHandler = mockHandler.Object;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act
             using (factory.CreateClient())
@@ -122,7 +125,8 @@ namespace Microsoft.Extensions.Http
                 b.PrimaryHandler = mockHandler.Object;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act
             using (factory.CreateHandler())
@@ -142,7 +146,8 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act
             var client = factory.CreateClient();
@@ -161,7 +166,8 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act
             var client = factory.CreateClient("github");
@@ -224,7 +230,8 @@ namespace Microsoft.Extensions.Http
                     b.AdditionalHandlers.Add((DelegatingHandler)expected[4]);
                 });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, new[]
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, new[]
             {
                 filter1.Object,
                 filter2.Object,
@@ -233,7 +240,7 @@ namespace Microsoft.Extensions.Http
 
             // Act
             var client = factory.CreateClient("github");
-            HttpMessageHandler handler = factory.GetActiveEntry("github").Handler;
+            HttpMessageHandler handler = factory._cache.GetActiveEntry("github").Handler;
 
             // Assert
             //
@@ -254,40 +261,41 @@ namespace Microsoft.Extensions.Http
         public async Task Factory_CreateClient_WithExpiry_CanExpire()
         {
             // Arrange
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act - 1 - Creating a client should add an entry to active handlers
             var client1 = factory.CreateClient("github");
 
             // Assert - 1
-            Assert.Equal(1, factory.GetActiveEntryCount());
-            var activeEntry1 = factory.GetActiveEntry("github");
+            Assert.Equal(1, factory._cache.GetActiveEntryCount());
+            var activeEntry1 = factory._cache.GetActiveEntry("github");
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
 
             // Act - 2 - Now simulate the timer triggering to complete the expiry.
-            var (completionSource, expiryTask) = factory.ActiveEntryState[activeEntry1];
+            var (completionSource, expiryTask) = factory._cache.ActiveEntryState[activeEntry1];
             completionSource.SetResult(activeEntry1);
             await expiryTask;
 
             // Assert - 2
-            Assert.Equal(0, factory.GetActiveEntryCount());
-            Assert.True(factory.CleanupTimerStarted.IsSet, "Cleanup timer started");
+            Assert.Equal(0, factory._cache.GetActiveEntryCount());
+            Assert.True(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer started");
 
-            var expiredEntry1 = Assert.Single(factory._expiredHandlers);
+            var expiredEntry1 = Assert.Single(factory._cache._expiredHandlers);
             Assert.NotSame(expiredEntry1.InnerHandler, activeEntry1.Handler);
 
             // Act - 3 - Creating a client should add another entry
             var client2 = factory.CreateClient("github");
 
             // Assert - 3
-            Assert.Equal(1, factory.GetActiveEntryCount());
-            var activeEntry2 = factory.GetActiveEntry("github");
+            Assert.Equal(1, factory._cache.GetActiveEntryCount());
+            var activeEntry2 = factory._cache.GetActiveEntry("github");
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
@@ -299,18 +307,19 @@ namespace Microsoft.Extensions.Http
         public async Task Factory_CreateClient_WithExpiry_HandlerCanBeReusedBeforeExpiry()
         {
             // Arrange
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             // Act - 1 - Creating a client should add an entry to active handlers
             var client1 = factory.CreateClient("github");
 
             // Assert - 1
-            Assert.Equal(1, factory.GetActiveEntryCount());
-            var activeEntry1 = factory.GetActiveEntry("github");
+            Assert.Equal(1, factory._cache.GetActiveEntryCount());
+            var activeEntry1 = factory._cache.GetActiveEntry("github");
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
@@ -319,28 +328,28 @@ namespace Microsoft.Extensions.Http
             var client2 = factory.CreateClient("github");
 
             // Assert - 2
-            Assert.Equal(1, factory.GetActiveEntryCount());
-            var activeEntry2 = factory.GetActiveEntry("github");
+            Assert.Equal(1, factory._cache.GetActiveEntryCount());
+            var activeEntry2 = factory._cache.GetActiveEntry("github");
             Assert.Same(activeEntry1, activeEntry2);
 
             // Act - 3 - Now simulate the timer triggering to complete the expiry.
-            var (completionSource, expiryTask) = factory.ActiveEntryState[activeEntry1];
+            var (completionSource, expiryTask) = factory._cache.ActiveEntryState[activeEntry1];
             completionSource.SetResult(activeEntry1);
             await expiryTask;
 
             // Assert - 3
-            Assert.Equal(0, factory.GetActiveEntryCount());
-            Assert.True(factory.CleanupTimerStarted.IsSet, "Cleanup timer started");
+            Assert.Equal(0, factory._cache.GetActiveEntryCount());
+            Assert.True(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer started");
 
-            var expiredEntry1 = Assert.Single(factory._expiredHandlers);
+            var expiredEntry1 = Assert.Single(factory._cache._expiredHandlers);
             Assert.NotSame(expiredEntry1.InnerHandler, activeEntry1.Handler);
 
             // Act - 4 - Creating a client should add another entry
             var client3 = factory.CreateClient("github");
 
             // Assert - 4
-            Assert.Equal(1, factory.GetActiveEntryCount());
-            var activeEntry3 = factory.GetActiveEntry("github");
+            Assert.Equal(1, factory._cache.GetActiveEntryCount());
+            var activeEntry3 = factory._cache.GetActiveEntry("github");
             Assert.Equal("github", activeEntry3.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry3.Lifetime);
             Assert.NotNull(activeEntry3.Handler);
@@ -358,11 +367,12 @@ namespace Microsoft.Extensions.Http
                 b.AdditionalHandlers.Add(disposeHandler);
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             var cleanupEntry = await SimulateClientUse_Factory_CleanupCycle_DisposesEligibleHandler(factory);
 
@@ -385,12 +395,12 @@ namespace Microsoft.Extensions.Http
             Assert.True(cleanupEntry.CanDispose, "Cleanup entry disposable");
 
             // Act
-            factory.CleanupTimer_Tick();
+            factory._cache.CleanupTimer_Tick();
 
             // Assert
-            Assert.Empty(factory._expiredHandlers);
+            Assert.Empty(factory._cache._expiredHandlers);
             Assert.Equal(1, disposeHandler.DisposeCount);
-            Assert.False(factory.CleanupTimerStarted.IsSet, "Cleanup timer not started");
+            Assert.False(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer not started");
         }
 
         // Seprate to avoid the HttpClient getting its lifetime extended by
@@ -401,13 +411,13 @@ namespace Microsoft.Extensions.Http
             // Create a handler and move it to the expired state
             var client1 = factory.CreateClient("github");
 
-            var kvp = Assert.Single(factory.ActiveEntryState);
+            var kvp = Assert.Single(factory._cache.ActiveEntryState);
             kvp.Value.Item1.SetResult(kvp.Key);
             await kvp.Value.Item2;
 
             // Our handler is now in the cleanup state.
-            var cleanupEntry = Assert.Single(factory._expiredHandlers);
-            Assert.True(factory.CleanupTimerStarted.IsSet, "Cleanup timer started");
+            var cleanupEntry = Assert.Single(factory._cache._expiredHandlers);
+            Assert.True(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer started");
 
             // We need to make sure that the outer handler actually gets GCed, so drop our references to it.
             // This is important because the factory relies on this possibility for correctness. We need to ensure that
@@ -428,11 +438,12 @@ namespace Microsoft.Extensions.Http
                 b.AdditionalHandlers.Add(disposeHandler);
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var cache = new TestHttpMessageHandlerCache(LoggerFactory)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
             };
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, Options, cache, EmptyFilters);
 
             var cleanupEntry = await SimulateClientUse_Factory_CleanupCycle_DisposesLiveHandler(factory, disposeHandler);
 
@@ -455,12 +466,12 @@ namespace Microsoft.Extensions.Http
             Assert.True(cleanupEntry.CanDispose, "Cleanup entry disposable");
 
             // Act - 2
-            factory.CleanupTimer_Tick();
+            factory._cache.CleanupTimer_Tick();
 
             // Assert
-            Assert.Empty(factory._expiredHandlers);
+            Assert.Empty(factory._cache._expiredHandlers);
             Assert.Equal(1, disposeHandler.DisposeCount);
-            Assert.False(factory.CleanupTimerStarted.IsSet, "Cleanup timer not started");
+            Assert.False(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer not started");
         }
 
         // Seprate to avoid the HttpClient getting its lifetime extended by
@@ -473,13 +484,13 @@ namespace Microsoft.Extensions.Http
             // Create a handler and move it to the expired state
             var client1 = factory.CreateClient("github");
 
-            var kvp = Assert.Single(factory.ActiveEntryState);
+            var kvp = Assert.Single(factory._cache.ActiveEntryState);
             kvp.Value.Item1.SetResult(kvp.Key);
             await kvp.Value.Item2;
 
             // Our handler is now in the cleanup state.
-            var cleanupEntry = Assert.Single(factory._expiredHandlers);
-            Assert.True(factory.CleanupTimerStarted.IsSet, "Cleanup timer started");
+            var cleanupEntry = Assert.Single(factory._cache._expiredHandlers);
+            Assert.True(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer started");
 
             // Nulling out the references to the internal state of the factory since they wouldn't exist in the non-test
             // scenario. We're holding on the client to prevent disposal - like a real use case.
@@ -491,15 +502,15 @@ namespace Microsoft.Extensions.Http
 
             // Let's verify the the ActiveHandlerTrackingEntry is gone. This would be prevent
             // the handler from being disposed if it was still rooted.
-            Assert.Empty(factory.ActiveEntryState);
+            Assert.Empty(factory._cache.ActiveEntryState);
 
             // Act - 1 - Run a cleanup cycle, this will not dispose the handler, because the client is still live.
-            factory.CleanupTimer_Tick();
+            factory._cache.CleanupTimer_Tick();
 
             // Assert
-            Assert.Same(cleanupEntry, Assert.Single(factory._expiredHandlers));
+            Assert.Same(cleanupEntry, Assert.Single(factory._cache._expiredHandlers));
             Assert.Equal(0, disposeHandler.DisposeCount);
-            Assert.True(factory.CleanupTimerStarted.IsSet, "Cleanup timer started");
+            Assert.True(factory._cache.CleanupTimerStarted.IsSet, "Cleanup timer started");
 
             // We need to make sure that the outer handler actually gets GCed, so drop our references to it.
             // This is important because the factory relies on this possibility for correctness. We need to ensure that
@@ -514,15 +525,25 @@ namespace Microsoft.Extensions.Http
             return cleanupEntry;
         }
 
-        private class TestHttpClientFactory : DefaultHttpClientFactory
+        private class TestHttpClientFactory : TransientHttpClientFactory
         {
+            internal TestHttpMessageHandlerCache _cache;
+
             public TestHttpClientFactory(
                 IServiceProvider services,
                 IServiceScopeFactory scopeFactory,
-                ILoggerFactory loggerFactory,
                 IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor,
-                IEnumerable<IHttpMessageHandlerBuilderFilter> filters)
-                : base(services, scopeFactory, loggerFactory, optionsMonitor, filters)
+                TestHttpMessageHandlerCache singletonCache,
+                IEnumerable<IHttpMessageHandlerBuilderFilter> filters) : base(services, scopeFactory, optionsMonitor, singletonCache, filters)
+            {
+                _cache = singletonCache;
+            }
+        }
+
+        private class TestHttpMessageHandlerCache : SingletonHttpMessageHandlerCache
+        {
+            public TestHttpMessageHandlerCache(ILoggerFactory loggerFactory)
+                : base(loggerFactory)
             {
                 ActiveEntryState = new Dictionary<ActiveHandlerTrackingEntry, (TaskCompletionSource<ActiveHandlerTrackingEntry>, Task)>();
                 CleanupTimerStarted = new ManualResetEventSlim(initialState: false);

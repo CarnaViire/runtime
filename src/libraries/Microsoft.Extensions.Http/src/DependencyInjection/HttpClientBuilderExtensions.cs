@@ -362,7 +362,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.AddTransient<TClient>(s =>
             {
-                HttpClient httpClient = s.GetRequiredHttpClient(builder.Name);
+                HttpClient httpClient = s.GetHttpClient(builder.Name);
 
                 ITypedHttpClientFactory<TClient> typedClientFactory = s.GetRequiredService<ITypedHttpClientFactory<TClient>>();
                 return typedClientFactory.CreateClient(httpClient);
@@ -424,7 +424,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.AddTransient<TClient>(s =>
             {
-                HttpClient httpClient = s.GetRequiredHttpClient(builder.Name);
+                HttpClient httpClient = s.GetHttpClient(builder.Name);
 
                 ITypedHttpClientFactory<TImplementation> typedClientFactory = s.GetRequiredService<ITypedHttpClientFactory<TImplementation>>();
                 return typedClientFactory.CreateClient(httpClient);
@@ -477,7 +477,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.AddTransient<TClient>(s =>
             {
-                HttpClient httpClient = s.GetRequiredHttpClient(builder.Name);
+                HttpClient httpClient = s.GetHttpClient(builder.Name);
 
                 return factory(httpClient);
             });
@@ -539,7 +539,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.AddTransient<TClient>(s =>
             {
-                HttpClient httpClient = s.GetRequiredHttpClient(builder.Name);
+                HttpClient httpClient = s.GetHttpClient(builder.Name);
 
                 return factory(httpClient, s);
             });
@@ -580,18 +580,10 @@ namespace Microsoft.Extensions.DependencyInjection
         /// will be resolved in the existing DI scope.
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// Configurations with <see cref="HttpClientFactoryOptions.PreserveExistingScope"/> set to `true` can only be used with
-        /// <see cref="IScopedHttpClientFactory"/> and <see cref="IScopedHttpMessageHandlerFactory"/>.
-        /// Configurations with <see cref="HttpClientFactoryOptions.PreserveExistingScope"/> set to `false` can only be used with
-        /// <see cref="IHttpClientFactory"/> and <see cref="IHttpMessageHandlerFactory"/>.
-        /// </para>
-        /// <para>
         /// If <see cref="HttpClientFactoryOptions.PreserveExistingScope"/> set to `true`, only default primary message handler can be used,
         /// it should not be changed by methods like
         /// <see cref="HttpClientBuilderExtensions.ConfigurePrimaryHttpMessageHandler(IHttpClientBuilder, Func{IServiceProvider, HttpMessageHandler})"/> or
         /// <see cref="HttpClientBuilderExtensions.ConfigureHttpMessageHandlerBuilder(IHttpClientBuilder, Action{HttpMessageHandlerBuilder})"/>
-        /// </para>
         /// </remarks>
         /// <param name="builder">The <see cref="IHttpClientBuilder"/>.</param>
         /// <param name="preserveExistingScope">Whether the additional message handlers will be resolved in the existing DI scope</param>
@@ -717,21 +709,10 @@ namespace Microsoft.Extensions.DependencyInjection
             }
         }
 
-        private static HttpClient GetRequiredHttpClient(this IServiceProvider s, string name)
+        private static HttpClient GetHttpClient(this IServiceProvider s, string name)
         {
-            var optionsMonitor = s.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>();
-            var options = optionsMonitor.Get(name);
-
-            if (options.PreserveExistingScope)
-            {
-                IScopedHttpClientFactory scopedFactory = s.GetRequiredService<IScopedHttpClientFactory>();
-                return scopedFactory.CreateClient(name);
-            }
-            else
-            {
-                IHttpClientFactory httpClientFactory = s.GetRequiredService<IHttpClientFactory>();
-                return httpClientFactory.CreateClient(name);
-            }
+            IHttpClientFactory httpClientFactory = s.GetRequiredService<IHttpClientFactory>();
+            return httpClientFactory.CreateClient(name);
         }
     }
 }
