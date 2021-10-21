@@ -397,6 +397,7 @@ namespace System.Net.Http
 
             _canRetry = false;
             _startedSendingRequestBody = false;
+            bool _initialReadSucceeded = false;
 
             // Send the request.
             if (NetEventSource.Log.IsEnabled()) Trace($"Sending request: {request}");
@@ -592,7 +593,7 @@ namespace System.Net.Http
 
                     throw new IOException(SR.net_http_invalid_response_premature_eof);
                 }
-
+                _initialReadSucceeded = true;
 
                 // Parse the response status line.
                 var response = new HttpResponseMessage() { RequestMessage = request, Content = new HttpConnectionResponseContent() };
@@ -772,6 +773,15 @@ namespace System.Net.Http
             }
             catch (Exception error)
             {
+                if (error is IOException ioe && ioe.InnerException is SocketException se && se.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    // The server shutdown the connection on their end. If we haven't received any data
+                    // from the server yet, the shutdown was likely because of an idle timeout.
+                    // If we haven't started sending the request body yet (or there is no request body),
+                    // then we allow the request to be retried.
+                    _canRetry |= !_initialReadSucceeded && !_startedSendingRequestBody;
+                }
+
                 // Clean up the cancellation registration in case we're still registered.
                 cancellationRegistration.Dispose();
 

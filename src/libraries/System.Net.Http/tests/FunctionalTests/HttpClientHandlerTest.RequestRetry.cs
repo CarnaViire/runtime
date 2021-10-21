@@ -156,6 +156,83 @@ namespace System.Net.Http.Functional.Tests
             });
         }
 
+        [Fact]
+        public async Task GetAsyncOnNewConnection_RetryOnConnectionReset_Success()
+        {
+            var sem = new SemaphoreSlim(0);
+
+            await LoopbackServer.CreateClientAndServerAsync(async url =>
+            {
+                using (HttpClient client = CreateHttpClient())
+                {
+                    // Send request. The server will close the first connection after it is successfully established, but SocketsHttpHandler should retry the request.
+                    Task<HttpResponseMessage> responseTask = client.GetAsync(url);
+                    sem.Release();
+                    HttpResponseMessage response = await responseTask;
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    Assert.Equal(SimpleContent, await response.Content.ReadAsStringAsync());
+                }
+            },
+            async server =>
+            {
+                // Accept first connection
+                await server.AcceptConnectionAsync(async connection =>
+                {
+                    // Wait for client to issue a request
+                    await sem.WaitAsync();
+
+                    // Don't read anything, just close underlying socket to issue TCP RST
+                    connection.Socket.Close();
+                });
+
+                // Client should reconnect.  Accept that connection and send response.
+                await server.AcceptConnectionSendResponseAndCloseAsync(content: SimpleContent);
+            });
+        }
+
+        [Fact]
+        public async Task GetAsyncOnExistingConnection_RetryOnConnectionReset_Success()
+        {
+            var sem = new SemaphoreSlim(0);
+
+            await LoopbackServer.CreateClientAndServerAsync(async url =>
+            {
+                using (HttpClient client = CreateHttpClient())
+                {
+                    // Send initial request and receive response so connection is established
+                    HttpResponseMessage response1 = await client.GetAsync(url);
+                    Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
+                    Assert.Equal(SimpleContent, await response1.Content.ReadAsStringAsync());
+
+                    // Send second request.  Should reuse same connection.
+                    // The server will close the connection, but HttpClient should retry the request.
+                    Task<HttpResponseMessage> response2Task = client.GetAsync(url);
+                    sem.Release();
+                    HttpResponseMessage response2 = await response2Task;
+                    Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+                    Assert.Equal(SimpleContent, await response2.Content.ReadAsStringAsync());
+                }
+            },
+            async server =>
+            {
+                // Accept first connection
+                await server.AcceptConnectionAsync(async connection =>
+                {
+                    // Initial response
+                    await connection.ReadRequestHeaderAndSendResponseAsync(content: SimpleContent);
+
+                    // Wait for client to issue a second request
+                    await sem.WaitAsync();
+
+                    // Second response: Don't read anything, just close underlying socket to issue TCP RST
+                    connection.Socket.Close();
+                });
+
+                // Client should reconnect.  Accept that connection and send response.
+                await server.AcceptConnectionSendResponseAndCloseAsync(content: SimpleContent);
+            });
+        }
+
         private sealed class SynchronizedSendContent : HttpContent
         {
             private readonly Task _connectionClosed;
