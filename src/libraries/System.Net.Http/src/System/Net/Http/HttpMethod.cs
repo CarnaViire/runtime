@@ -202,5 +202,20 @@ namespace System.Net.Http
                        !ReferenceEquals(this, HttpMethod.Options) && !ReferenceEquals(this, HttpMethod.Delete);
             }
         }
+
+        internal bool IsIdempotent
+        {
+            get
+            {
+                // Normalize before calling this
+                Debug.Assert(ReferenceEquals(this, Normalize(this)));
+
+                // RFC 2616, Section 9.1.2
+                /*return ReferenceEquals(this, HttpMethod.Get) || ReferenceEquals(this, HttpMethod.Head) || ReferenceEquals(this, HttpMethod.Put) ||
+                       ReferenceEquals(this, HttpMethod.Delete) || ReferenceEquals(this, HttpMethod.Options) || ReferenceEquals(this, HttpMethod.Trace);*/
+
+                return ReferenceEquals(this, HttpMethod.Get);
+            }
+        }
     }
 }

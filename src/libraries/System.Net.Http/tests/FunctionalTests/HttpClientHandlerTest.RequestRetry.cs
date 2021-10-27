@@ -159,16 +159,12 @@ namespace System.Net.Http.Functional.Tests
         [Fact]
         public async Task GetAsyncOnNewConnection_RetryOnConnectionReset_Success()
         {
-            var sem = new SemaphoreSlim(0);
-
             await LoopbackServer.CreateClientAndServerAsync(async url =>
             {
                 using (HttpClient client = CreateHttpClient())
                 {
                     // Send request. The server will close the first connection after it is successfully established, but SocketsHttpHandler should retry the request.
-                    Task<HttpResponseMessage> responseTask = client.GetAsync(url);
-                    sem.Release();
-                    HttpResponseMessage response = await responseTask;
+                    HttpResponseMessage response = await client.GetAsync(url);
                     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                     Assert.Equal(SimpleContent, await response.Content.ReadAsStringAsync());
                 }
@@ -179,9 +175,10 @@ namespace System.Net.Http.Functional.Tests
                 await server.AcceptConnectionAsync(async connection =>
                 {
                     // Wait for client to issue a request
-                    await sem.WaitAsync();
+                    // Need to read at least something here, otherwise client might get ConnectionAborted instead of ConnectionReset
+                    await connection.ReadRequestHeaderAsync();
 
-                    // Don't read anything, just close underlying socket to issue TCP RST
+                    // Close underlying socket to issue TCP RST
                     connection.Socket.Close();
                 });
 

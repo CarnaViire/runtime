@@ -585,8 +585,8 @@ namespace System.Net.Http
                 {
                     // The server shutdown the connection on their end, likely because of an idle timeout.
                     // If we haven't started sending the request body yet (or there is no request body),
-                    // then we allow the request to be retried.
-                    if (!_startedSendingRequestBody)
+                    // then we allow idempotent requests to be retried.
+                    if (!_startedSendingRequestBody && normalizedMethod.IsIdempotent)
                     {
                         _canRetry = true;
                     }
@@ -773,13 +773,13 @@ namespace System.Net.Http
             }
             catch (Exception error)
             {
-                if (error is IOException ioe && ioe.InnerException is SocketException se && se.SocketErrorCode == SocketError.ConnectionReset)
+                if (error is IOException ioe && ioe.InnerException is SocketException se && (se.SocketErrorCode == SocketError.ConnectionReset))
                 {
                     // The server shutdown the connection on their end. If we haven't received any data
                     // from the server yet, the shutdown was likely because of an idle timeout.
                     // If we haven't started sending the request body yet (or there is no request body),
-                    // then we allow the request to be retried.
-                    _canRetry |= !_initialReadSucceeded && !_startedSendingRequestBody;
+                    // then we allow idempotent requests to be retried.
+                    _canRetry |= !_initialReadSucceeded && !_startedSendingRequestBody && normalizedMethod.IsIdempotent;
                 }
 
                 // Clean up the cancellation registration in case we're still registered.
