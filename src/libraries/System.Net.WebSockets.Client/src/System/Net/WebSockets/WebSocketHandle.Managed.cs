@@ -16,6 +16,17 @@ using System.Threading.Tasks;
 
 namespace System.Net.WebSockets
 {
+    internal class WebSocketConnectResult
+    {
+        public bool IsSuccess => Error == null;
+
+        public WebSocketError? Error { get; internal set; }
+        public string? ErrorMessage { get; internal set; }
+
+        public int? HttpStatusCode { get; internal set; }
+        public IDictionary<string, IEnumerable<string>>? HttpResponseHeaders { get; internal set; }
+    }
+
     internal sealed class WebSocketHandle
     {
         /// <summary>Shared, lazily-initialized handler for when using default options.</summary>
@@ -42,8 +53,9 @@ namespace System.Net.WebSockets
             WebSocket?.Abort();
         }
 
-        public async Task ConnectAsync(Uri uri, CancellationToken cancellationToken, ClientWebSocketOptions options)
+        public async Task<WebSocketConnectResult> TryConnectAsync(Uri uri, CancellationToken cancellationToken, ClientWebSocketOptions options)
         {
+            WebSocketConnectResult result = new();
             HttpResponseMessage? response = null;
             SocketsHttpHandler? handler = null;
             bool disposeHandler = true;
@@ -141,18 +153,41 @@ namespace System.Net.WebSockets
                 using (linkedCancellation)
                 {
                     response = await new HttpMessageInvoker(handler).SendAsync(request, externalAndAbortCancellation.Token).ConfigureAwait(false);
+
+                    result.HttpStatusCode = (int)response.StatusCode;
+                    // TODO: do we want to add a wrapper so we won't copy?
+                    // TODO 2: enumerating headers will parse all values -- is it ok?
+                    result.HttpResponseHeaders = new Dictionary<string, IEnumerable<string>>(response.Headers);
+
                     externalAndAbortCancellation.Token.ThrowIfCancellationRequested(); // poll in case sends/receives in request/response didn't observe cancellation
                 }
 
                 if (response.StatusCode != HttpStatusCode.SwitchingProtocols)
                 {
-                    throw new WebSocketException(WebSocketError.NotAWebSocket, SR.Format(SR.net_WebSockets_Connect101Expected, (int)response.StatusCode));
+                    result.Error = WebSocketError.NotAWebSocket;
+                    result.ErrorMessage = SR.Format(SR.net_WebSockets_Connect101Expected, (int)response.StatusCode);
+                    return result;
                 }
 
                 // The Connection, Upgrade, and SecWebSocketAccept headers are required and with specific values.
-                ValidateHeader(response.Headers, HttpKnownHeaderNames.Connection, "Upgrade");
-                ValidateHeader(response.Headers, HttpKnownHeaderNames.Upgrade, "websocket");
-                ValidateHeader(response.Headers, HttpKnownHeaderNames.SecWebSocketAccept, secKeyAndSecWebSocketAccept.Value);
+                if (!ValidateHeader(response.Headers, HttpKnownHeaderNames.Connection, "Upgrade", out var error, out var errorMessage))
+                {
+                    result.Error = error;
+                    result.ErrorMessage = errorMessage;
+                    return result;
+                }
+                if (!ValidateHeader(response.Headers, HttpKnownHeaderNames.Upgrade, "websocket", out error, out errorMessage))
+                {
+                    result.Error = error;
+                    result.ErrorMessage = errorMessage;
+                    return result;
+                }
+                if (!ValidateHeader(response.Headers, HttpKnownHeaderNames.SecWebSocketAccept, secKeyAndSecWebSocketAccept.Value, out error, out errorMessage))
+                {
+                    result.Error = error;
+                    result.ErrorMessage = errorMessage;
+                    return result;
+                }
 
                 // The SecWebSocketProtocol header is optional.  We should only get it with a non-empty value if we requested subprotocols,
                 // and then it must only be one of the ones we requested.  If we got a subprotocol other than one we requested (or if we
@@ -178,9 +213,9 @@ namespace System.Net.WebSockets
 
                         if (subprotocol == null)
                         {
-                            throw new WebSocketException(
-                                WebSocketError.UnsupportedProtocol,
-                                SR.Format(SR.net_WebSockets_AcceptUnsupportedProtocol, string.Join(", ", options.RequestedSubProtocols), string.Join(", ", subprotocolArray)));
+                            result.Error = WebSocketError.UnsupportedProtocol;
+                            result.ErrorMessage = SR.Format(SR.net_WebSockets_AcceptUnsupportedProtocol, string.Join(", ", options.RequestedSubProtocols), string.Join(", ", subprotocolArray));
+                            return result;
                         }
                     }
                 }
@@ -194,7 +229,23 @@ namespace System.Net.WebSockets
                     {
                         if (extension.TrimStart().StartsWith(ClientWebSocketDeflateConstants.Extension))
                         {
-                            negotiatedDeflateOptions = ParseDeflateOptions(extension, options.DangerousDeflateOptions);
+                            negotiatedDeflateOptions = ParseDeflateOptions(extension);
+
+                            if (negotiatedDeflateOptions.ClientMaxWindowBits > options.DangerousDeflateOptions.ClientMaxWindowBits)
+                            {
+                                result.Error = WebSocketError.Faulted;
+                                result.ErrorMessage = string.Format(SR.net_WebSockets_ClientWindowBitsNegotiationFailure,
+                                    options.DangerousDeflateOptions.ClientMaxWindowBits, negotiatedDeflateOptions.ClientMaxWindowBits);
+                                return result;
+                            }
+                            if (negotiatedDeflateOptions.ServerMaxWindowBits > options.DangerousDeflateOptions.ServerMaxWindowBits)
+                            {
+                                result.Error = WebSocketError.Faulted;
+                                result.ErrorMessage = string.Format(SR.net_WebSockets_ServerWindowBitsNegotiationFailure,
+                                    options.DangerousDeflateOptions.ServerMaxWindowBits, negotiatedDeflateOptions.ServerMaxWindowBits);
+                                return result;
+                            }
+
                             break;
                         }
                     }
@@ -202,7 +253,9 @@ namespace System.Net.WebSockets
 
                 if (response.Content is null)
                 {
-                    throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely);
+                    result.Error = WebSocketError.ConnectionClosedPrematurely;
+                    result.ErrorMessage = "The remote party closed the WebSocket connection without completing the close handshake."; // TODO: to resource string
+                    return result;
                 }
 
                 // Get the response stream and wrap it in a web socket.
@@ -217,6 +270,8 @@ namespace System.Net.WebSockets
                     DangerousDeflateOptions = negotiatedDeflateOptions
                 });
                 _negotiatedDeflateOptions = negotiatedDeflateOptions;
+
+                return result;
             }
             catch (Exception exc)
             {
@@ -228,8 +283,19 @@ namespace System.Net.WebSockets
                 Abort();
                 response?.Dispose();
 
-                if (exc is WebSocketException ||
-                    (exc is OperationCanceledException && cancellationToken.IsCancellationRequested))
+                if (exc is WebSocketException wse)
+                {
+                    if (wse.InnerException != null)
+                    {
+                        throw; // TODO: not sure this will ever happen, but try to preserve information just in case
+                    }
+
+                    result.Error = wse.WebSocketErrorCode;
+                    result.ErrorMessage = wse.Message;
+                    return result;
+                }
+
+                if (exc is OperationCanceledException && cancellationToken.IsCancellationRequested)
                 {
                     throw;
                 }
@@ -246,7 +312,16 @@ namespace System.Net.WebSockets
             }
         }
 
-        private static WebSocketDeflateOptions ParseDeflateOptions(ReadOnlySpan<char> extension, WebSocketDeflateOptions original)
+        public async Task ConnectAsync(Uri uri, CancellationToken cancellationToken, ClientWebSocketOptions options)
+        {
+            WebSocketConnectResult result = await TryConnectAsync(uri, cancellationToken, options);
+            if (!result.IsSuccess)
+            {
+                throw new WebSocketException((WebSocketError)result.Error!, result.ErrorMessage);
+            }
+        }
+
+        private static WebSocketDeflateOptions ParseDeflateOptions(ReadOnlySpan<char> extension)
         {
             var options = new WebSocketDeflateOptions();
 
@@ -296,18 +371,6 @@ namespace System.Net.WebSockets
                     break;
                 }
                 extension = extension[(end + 1)..];
-            }
-
-            if (options.ClientMaxWindowBits > original.ClientMaxWindowBits)
-            {
-                throw new WebSocketException(string.Format(SR.net_WebSockets_ClientWindowBitsNegotiationFailure,
-                    original.ClientMaxWindowBits, options.ClientMaxWindowBits));
-            }
-
-            if (options.ServerMaxWindowBits > original.ServerMaxWindowBits)
-            {
-                throw new WebSocketException(string.Format(SR.net_WebSockets_ServerWindowBitsNegotiationFailure,
-                    original.ServerMaxWindowBits, options.ServerMaxWindowBits));
             }
 
             return options;
@@ -406,7 +469,7 @@ namespace System.Net.WebSockets
                 Convert.ToBase64String(bytes.Slice(0, bytesWritten)));
         }
 
-        private static void ValidateHeader(HttpHeaders headers, string name, string expectedValue)
+        private static bool ValidateHeader(HttpHeaders headers, string name, string expectedValue, out WebSocketError? error, out string? errorMessage)
         {
             if (headers.NonValidated.TryGetValues(name, out HeaderStringValues hsv))
             {
@@ -416,16 +479,22 @@ namespace System.Net.WebSockets
                     {
                         if (string.Equals(value, expectedValue, StringComparison.OrdinalIgnoreCase))
                         {
-                            return;
+                            error = null;
+                            errorMessage = null;
+                            return true;
                         }
                         break;
                     }
                 }
 
-                throw new WebSocketException(WebSocketError.HeaderError, SR.Format(SR.net_WebSockets_InvalidResponseHeader, name, hsv));
+                error = WebSocketError.HeaderError;
+                errorMessage = SR.Format(SR.net_WebSockets_InvalidResponseHeader, name, hsv);
+                return false;
             }
 
-            throw new WebSocketException(WebSocketError.Faulted, SR.Format(SR.net_WebSockets_MissingResponseHeader, name));
+            error = WebSocketError.Faulted;
+            errorMessage = SR.Format(SR.net_WebSockets_MissingResponseHeader, name);
+            return false;
         }
 
         /// <summary>Used as a sentinel to indicate that ClientWebSocket should use the system's default proxy.</summary>
