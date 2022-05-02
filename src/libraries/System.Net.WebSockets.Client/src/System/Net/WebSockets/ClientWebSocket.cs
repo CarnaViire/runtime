@@ -1,12 +1,25 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace System.Net.WebSockets
 {
+    public class WebSocketConnectResult
+    {
+        public bool IsSuccess => Error == null;
+
+        public WebSocketError? Error { get; internal set; }
+        public string? ErrorMessage { get; internal set; }
+        public Exception? Exception { get; internal set; }
+
+        public int? HttpStatusCode { get; internal set; }
+        public IDictionary<string, IEnumerable<string>>? HttpResponseHeaders { get; internal set; }
+    }
+
     public sealed partial class ClientWebSocket : WebSocket
     {
         /// <summary>This is really an InternalState value, but Interlocked doesn't support operations on values of enum types.</summary>
@@ -52,6 +65,78 @@ namespace System.Net.WebSockets
 
         public Task ConnectAsync(Uri uri, CancellationToken cancellationToken)
         {
+            ConnectStart(uri);
+            return ConnectAsyncCore(uri, cancellationToken);
+        }
+
+        public Task<WebSocketConnectResult> TryConnectAsync(Uri uri, CancellationToken cancellationToken)
+        {
+            try
+            {
+                ConnectStart(uri);
+            }
+            catch (Exception e)
+            {
+                WebSocketConnectResult result = new();
+                result.Error = e is ObjectDisposedException || e is InvalidOperationException
+                    ? WebSocketError.InvalidState
+                    : WebSocketError.Faulted;
+                result.ErrorMessage = e.Message; // todo
+                result.Exception = e;
+                return Task.FromResult(result);
+            }
+
+            return TryConnectAsyncCore(uri, cancellationToken);
+        }
+
+        private async Task<WebSocketConnectResult> TryConnectAsyncCore(Uri uri, CancellationToken cancellationToken)
+        {
+            _innerWebSocket = new WebSocketHandle();
+
+            WebSocketConnectResult result = await _innerWebSocket.TryConnectAsync(uri, cancellationToken, Options).ConfigureAwait(false);
+            if (!result.IsSuccess)
+            {
+                Dispose();
+                return result;
+            }
+
+            try
+            {
+                ConnectEnd();
+            }
+            catch (Exception e)
+            {
+
+                result.Error = e is ObjectDisposedException || e is InvalidOperationException
+                    ? WebSocketError.InvalidState
+                    : WebSocketError.Faulted;
+                result.ErrorMessage = e.Message; // todo
+                result.Exception = e;
+                return result;
+            }
+
+            return result;
+        }
+
+        private async Task ConnectAsyncCore(Uri uri, CancellationToken cancellationToken)
+        {
+            _innerWebSocket = new WebSocketHandle();
+
+            try
+            {
+                await _innerWebSocket.ConnectAsync(uri, cancellationToken, Options).ConfigureAwait(false);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+
+            ConnectEnd();
+        }
+
+        private void ConnectStart(Uri uri)
+        {
             ArgumentNullException.ThrowIfNull(uri);
 
             if (!uri.IsAbsoluteUri)
@@ -77,23 +162,10 @@ namespace System.Net.WebSockets
             }
 
             Options.SetToReadOnly();
-            return ConnectAsyncCore(uri, cancellationToken);
         }
 
-        private async Task ConnectAsyncCore(Uri uri, CancellationToken cancellationToken)
+        private void ConnectEnd()
         {
-            _innerWebSocket = new WebSocketHandle();
-
-            try
-            {
-                await _innerWebSocket.ConnectAsync(uri, cancellationToken, Options).ConfigureAwait(false);
-            }
-            catch
-            {
-                Dispose();
-                throw;
-            }
-
             if ((InternalState)Interlocked.CompareExchange(ref _state, (int)InternalState.Connected, (int)InternalState.Connecting) != InternalState.Connecting)
             {
                 Debug.Assert(_state == (int)InternalState.Disposed);

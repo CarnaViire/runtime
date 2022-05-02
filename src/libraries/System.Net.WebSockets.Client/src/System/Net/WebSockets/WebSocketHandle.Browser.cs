@@ -35,5 +35,11 @@ namespace System.Net.WebSockets
             WebSocket = ws;
             return ws.ConnectAsync(uri, options.RequestedSubProtocols, cancellationToken);
         }
+
+        public async Task<WebSocketConnectResult> TryConnectAsync(Uri uri, CancellationToken cancellationToken, ClientWebSocketOptions options)
+        {
+            await ConnectAsync(uri, cancellationToken, options);
+            return new WebSocketConnectResult();
+        }
     }
 }

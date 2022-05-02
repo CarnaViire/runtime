@@ -16,17 +16,6 @@ using System.Threading.Tasks;
 
 namespace System.Net.WebSockets
 {
-    internal class WebSocketConnectResult
-    {
-        public bool IsSuccess => Error == null;
-
-        public WebSocketError? Error { get; internal set; }
-        public string? ErrorMessage { get; internal set; }
-
-        public int? HttpStatusCode { get; internal set; }
-        public IDictionary<string, IEnumerable<string>>? HttpResponseHeaders { get; internal set; }
-    }
-
     internal sealed class WebSocketHandle
     {
         /// <summary>Shared, lazily-initialized handler for when using default options.</summary>
@@ -283,24 +272,23 @@ namespace System.Net.WebSockets
                 Abort();
                 response?.Dispose();
 
-                if (exc is WebSocketException wse)
+                if (exc is WebSocketException wse) // unwrap
                 {
-                    if (wse.InnerException != null)
-                    {
-                        throw; // TODO: not sure this will ever happen, but try to preserve information just in case
-                    }
-
                     result.Error = wse.WebSocketErrorCode;
                     result.ErrorMessage = wse.Message;
+                    result.Exception = wse.InnerException;
                     return result;
                 }
 
                 if (exc is OperationCanceledException && cancellationToken.IsCancellationRequested)
                 {
-                    throw;
+                    throw; //todo
                 }
 
-                throw new WebSocketException(WebSocketError.Faulted, SR.net_webstatus_ConnectFailure, exc);
+                result.Error = WebSocketError.Faulted;
+                result.ErrorMessage = SR.net_webstatus_ConnectFailure;
+                result.Exception = exc;
+                return result;
             }
             finally
             {
@@ -317,7 +305,7 @@ namespace System.Net.WebSockets
             WebSocketConnectResult result = await TryConnectAsync(uri, cancellationToken, options);
             if (!result.IsSuccess)
             {
-                throw new WebSocketException((WebSocketError)result.Error!, result.ErrorMessage);
+                throw new WebSocketException((WebSocketError)result.Error!, result.ErrorMessage, result.Exception);
             }
         }
 
