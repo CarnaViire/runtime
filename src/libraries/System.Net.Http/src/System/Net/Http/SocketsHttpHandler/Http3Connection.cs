@@ -187,7 +187,7 @@ namespace System.Net.Http
                             queueStartingTimestamp = Stopwatch.GetTimestamp();
                         }
 
-                        quicStream = await conn.OpenBidirectionalStreamAsync(cancellationToken).ConfigureAwait(false);
+                        quicStream = await conn.OpenBidirectionalStreamAsync(waitForStreamStart: false, cancellationToken).ConfigureAwait(false);
 
                         requestStream = new Http3RequestStream(request, this, quicStream);
                         lock (SyncObj)
@@ -213,12 +213,25 @@ namespace System.Net.Http
                     throw new HttpRequestException(SR.net_http_request_aborted, null, RequestRetryType.RetryOnConnectionFailure);
                 }
 
-                requestStream!.StreamId = quicStream.StreamId;
-
                 bool goAway;
                 lock (SyncObj)
                 {
-                    goAway = _firstRejectedStreamId != -1 && requestStream.StreamId >= _firstRejectedStreamId;
+                    if (_firstRejectedStreamId != -1)
+                    {
+                        if (requestStream!.StreamId == -1)
+                        {
+                            Console.WriteLine("Might reject good stream without ID on OpenStream");
+                            goAway = true;
+                        }
+                        else
+                        {
+                            goAway = requestStream!.StreamId >= _firstRejectedStreamId;
+                        }
+                    }
+                    else
+                    {
+                        goAway = false;
+                    }
                 }
 
                 if (goAway)
@@ -228,7 +241,7 @@ namespace System.Net.Http
 
                 if (NetEventSource.Log.IsEnabled()) Trace($"Sending request: {request}");
 
-                Task<HttpResponseMessage> responseTask = requestStream.SendAsync(cancellationToken);
+                Task<HttpResponseMessage> responseTask = requestStream!.SendAsync(cancellationToken);
 
                 // null out requestStream to avoid disposing in finally block. It is now in charge of disposing itself.
                 requestStream = null;
@@ -320,6 +333,12 @@ namespace System.Net.Http
 
                 foreach (KeyValuePair<QuicStream, Http3RequestStream> request in _activeRequests)
                 {
+                    if (request.Value.StreamId == -1)
+                    {
+                        Console.WriteLine("Might reject a good stream without ID on goaway");
+                        streamsToGoAway.Add(request.Value);
+                    }
+
                     if (request.Value.StreamId >= firstRejectedStreamId)
                     {
                         streamsToGoAway.Add(request.Value);

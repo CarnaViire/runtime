@@ -18,7 +18,7 @@ namespace System.Net.Quic.Implementations
 
         internal abstract ValueTask<QuicStreamProvider> OpenUnidirectionalStreamAsync(CancellationToken cancellationToken = default);
 
-        internal abstract ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(CancellationToken cancellationToken = default);
+        internal abstract ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(bool waitForStreamStart = true, CancellationToken cancellationToken = default);
 
         internal abstract int GetRemoteAvailableUnidirectionalStreamCount();
 

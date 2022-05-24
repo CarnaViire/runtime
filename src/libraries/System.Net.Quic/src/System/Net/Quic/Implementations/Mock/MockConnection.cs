@@ -187,7 +187,7 @@ namespace System.Net.Quic.Implementations.Mock
             return OpenStream(streamId, false);
         }
 
-        internal async override ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(CancellationToken cancellationToken)
+        internal async override ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(bool waitForStreamStart = true, CancellationToken cancellationToken = default)
         {
             PeerStreamLimit? streamLimit = RemoteStreamLimit;
             if (streamLimit is null)

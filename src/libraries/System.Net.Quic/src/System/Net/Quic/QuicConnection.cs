@@ -80,7 +80,7 @@ namespace System.Net.Quic
         /// Create an outbound bidirectional stream.
         /// </summary>
         /// <returns></returns>
-        public async ValueTask<QuicStream> OpenBidirectionalStreamAsync(CancellationToken cancellationToken = default) => new QuicStream(await _provider.OpenBidirectionalStreamAsync(cancellationToken).ConfigureAwait(false));
+        public async ValueTask<QuicStream> OpenBidirectionalStreamAsync(bool waitForStreamStart = true, CancellationToken cancellationToken = default) => new QuicStream(await _provider.OpenBidirectionalStreamAsync(waitForStreamStart, cancellationToken).ConfigureAwait(false));
 
 
         /// <summary>

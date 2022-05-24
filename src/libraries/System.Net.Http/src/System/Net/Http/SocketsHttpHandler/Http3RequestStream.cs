@@ -58,8 +58,19 @@ namespace System.Net.Http
 
         public long StreamId
         {
-            get => Volatile.Read(ref _streamId);
-            set => Volatile.Write(ref _streamId, value);
+            get {
+                if (_streamId == -1)
+                {
+                    _streamId = _stream.StreamId;
+                }
+                return _streamId;
+            }
+            set => throw new Exception("don't set StreamId");
+        }
+
+        public ValueTask WaitForStreamIdAsync(CancellationToken cancellationToken = default)
+        {
+            return _stream.WaitForStreamIdAsync(cancellationToken);
         }
 
         public Http3RequestStream(HttpRequestMessage request, Http3Connection connection, QuicStream stream)

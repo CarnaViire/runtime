@@ -297,6 +297,13 @@ namespace System.Net.Quic.Implementations.Mock
             return new ValueTask(WritesCompletedTcs.Task);
         }
 
+        internal override ValueTask WaitForStreamIdAsync(CancellationToken cancellationToken = default)
+        {
+            CheckDisposed();
+
+            return ValueTask.CompletedTask;
+        }
+
         private TaskCompletionSource WritesCompletedTcs => _isInitiator
             ? _streamState._outboundWritesCompletedTcs
             : _streamState._inboundWritesCompletedTcs;

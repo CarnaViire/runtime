@@ -418,7 +418,7 @@ namespace System.Net.Quic.Tests
         {
             ValueTask<QuicStream> OpenStreamAsync(QuicConnection connection, CancellationToken token = default) => unidirectional
                 ? connection.OpenUnidirectionalStreamAsync(token)
-                : connection.OpenBidirectionalStreamAsync(token);
+                : connection.OpenBidirectionalStreamAsync(cancellationToken: token);
 
             QuicListenerOptions listenerOptions = CreateQuicListenerOptions();
             listenerOptions.MaxUnidirectionalStreams = 1;
@@ -458,7 +458,7 @@ namespace System.Net.Quic.Tests
         {
             ValueTask<QuicStream> OpenStreamAsync(QuicConnection connection, CancellationToken token = default) => unidirectional
                 ? connection.OpenUnidirectionalStreamAsync(token)
-                : connection.OpenBidirectionalStreamAsync(token);
+                : connection.OpenBidirectionalStreamAsync(cancellationToken: token);
 
             (QuicConnection clientConnection, QuicConnection serverConnection) = await CreateConnectedQuicConnection(null, CreateQuicListenerOptions());
 
@@ -479,7 +479,7 @@ namespace System.Net.Quic.Tests
         {
             ValueTask<QuicStream> OpenStreamAsync(QuicConnection connection, CancellationToken token = default) => unidirectional
                 ? connection.OpenUnidirectionalStreamAsync(token)
-                : connection.OpenBidirectionalStreamAsync(token);
+                : connection.OpenBidirectionalStreamAsync(cancellationToken: token);
 
             QuicListenerOptions listenerOptions = CreateQuicListenerOptions();
             listenerOptions.MaxUnidirectionalStreams = 1;

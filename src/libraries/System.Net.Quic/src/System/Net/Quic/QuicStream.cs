@@ -130,6 +130,7 @@ namespace System.Net.Quic
         public ValueTask ShutdownCompleted(CancellationToken cancellationToken = default) => _provider.ShutdownCompleted(cancellationToken);
 
         public ValueTask WaitForWriteCompletionAsync(CancellationToken cancellationToken = default) => _provider.WaitForWriteCompletionAsync(cancellationToken);
+        public ValueTask WaitForStreamIdAsync(CancellationToken cancellationToken = default) => _provider.WaitForStreamIdAsync(cancellationToken);
 
         public void Shutdown() => _provider.Shutdown();
 

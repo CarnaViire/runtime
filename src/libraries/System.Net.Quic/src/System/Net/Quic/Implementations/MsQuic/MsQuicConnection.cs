@@ -461,7 +461,7 @@ namespace System.Net.Quic.Implementations.MsQuic
             return stream;
         }
 
-        private async ValueTask<QuicStreamProvider> OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS flags, CancellationToken cancellationToken)
+        private async ValueTask<QuicStreamProvider> OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS flags, bool waitForStreamStart, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             if (!Connected)
@@ -469,25 +469,28 @@ namespace System.Net.Quic.Implementations.MsQuic
                 throw new InvalidOperationException(SR.net_quic_not_connected);
             }
 
-            var stream = new MsQuicStream(_state, flags);
+            var stream = new MsQuicStream(_state, flags, unifiedStartAndSend: !waitForStreamStart);
 
-            try
+            if (waitForStreamStart)
             {
-                await stream.StartAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                stream.Dispose();
-                throw;
+                try
+                {
+                    await stream.StartAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    stream.Dispose();
+                    throw;
+                }
             }
 
             return stream;
         }
 
         internal override ValueTask<QuicStreamProvider> OpenUnidirectionalStreamAsync(CancellationToken cancellationToken = default)
-            => OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS.UNIDIRECTIONAL, cancellationToken);
-        internal override ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(CancellationToken cancellationToken = default)
-            => OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS.NONE, cancellationToken);
+            => OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS.UNIDIRECTIONAL, true, cancellationToken);
+        internal override ValueTask<QuicStreamProvider> OpenBidirectionalStreamAsync(bool waitForStreamStart = true, CancellationToken cancellationToken = default)
+            => OpenStreamAsync(QUIC_STREAM_OPEN_FLAGS.NONE, waitForStreamStart, cancellationToken);
 
         internal override int GetRemoteAvailableUnidirectionalStreamCount()
         {
