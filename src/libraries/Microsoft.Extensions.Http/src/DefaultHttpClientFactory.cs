@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.Http
 {
-    internal class DefaultHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFactory
+    internal partial class DefaultHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFactory
     {
         private static readonly TimerCallback _cleanupCallback = (s) => ((DefaultHttpClientFactory)s!).CleanupTimer_Tick();
         private readonly ILogger _logger;
@@ -58,6 +58,8 @@ namespace Microsoft.Extensions.Http
         internal readonly ConcurrentQueue<ExpiredHandlerTrackingEntry> _expiredHandlers;
         private readonly TimerCallback _expiryCallback;
 
+        private bool _userFiltersInjected;
+
         public DefaultHttpClientFactory(
             IServiceProvider services,
             IServiceScopeFactory scopeFactory,
@@ -75,6 +77,11 @@ namespace Microsoft.Extensions.Http
             _scopeFactory = scopeFactory;
             _optionsMonitor = optionsMonitor;
             _filters = filters.ToArray();
+            _userFiltersInjected = _filters.Length > 1 || (_filters.Length == 1 && _filters[0] is not LoggingHttpMessageHandlerBuilderFilter);
+            if (!_userFiltersInjected)
+            {
+                SetUpPrimaryHandlersCache();
+            }
 
             _logger = loggerFactory.CreateLogger<DefaultHttpClientFactory>();
 
@@ -123,6 +130,7 @@ namespace Microsoft.Extensions.Http
         }
 
         // Internal for tests
+        // This method executes from within a lock (via Lazy)
         internal ActiveHandlerTrackingEntry CreateHandlerEntry(string name)
         {
             IServiceProvider services = _services;
@@ -139,6 +147,8 @@ namespace Microsoft.Extensions.Http
             {
                 HttpMessageHandlerBuilder builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
                 builder.Name = name;
+
+                ConfigurePrimaryHandler(builder, options);
 
                 // This is similar to the initialization pattern in:
                 // https://github.com/aspnet/Hosting/blob/e892ed8bbdcd25a0dafc1850033398dc57f65fe1/src/Microsoft.AspNetCore.Hosting/Internal/WebHost.cs#L188
@@ -164,6 +174,11 @@ namespace Microsoft.Extensions.Http
 
                 void Configure(HttpMessageHandlerBuilder b)
                 {
+                    for (int i = 0; i < options.AdditionalHandlerBuilderActions.Count; i++)
+                    {
+                        options.AdditionalHandlerBuilderActions[i](b);
+                    }
+
                     for (int i = 0; i < options.HttpMessageHandlerBuilderActions.Count; i++)
                     {
                         options.HttpMessageHandlerBuilderActions[i](b);

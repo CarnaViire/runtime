@@ -77,7 +77,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
             {
-                options.HttpMessageHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(configureHandler()));
+                options.AdditionalHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(configureHandler()));
             });
 
             return builder;
@@ -105,7 +105,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
             {
-                options.HttpMessageHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(configureHandler(b.Services)));
+                options.AdditionalHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(configureHandler(b.Services)));
             });
 
             return builder;
@@ -132,7 +132,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
             {
-                options.HttpMessageHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(b.Services.GetRequiredService<THandler>()));
+                options.AdditionalHandlerBuilderActions.Add(b => b.AdditionalHandlers.Add(b.Services.GetRequiredService<THandler>()));
             });
 
             return builder;
@@ -156,7 +156,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
             {
-                options.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = configureHandler());
+                options.PrimaryHandlerFactory = configureHandler;
             });
 
             return builder;
