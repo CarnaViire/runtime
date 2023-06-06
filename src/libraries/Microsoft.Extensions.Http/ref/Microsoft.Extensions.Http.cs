@@ -5,6 +5,17 @@ namespace Microsoft.Extensions.DependencyInjection
 {
     public static partial class HttpClientBuilderExtensions
     {
+        //****
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigurePrimaryHttpMessageHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.HttpMessageHandler, System.IServiceProvider> configureHandler) { throw null; }
+#if NET5_0_OR_GREATER
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigurePrimarySocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler, System.IServiceProvider> configureHandler) { throw null; }
+#endif
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigureLogging(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<Microsoft.Extensions.Http.IHttpClientLoggingOptions> configure) { throw null; }
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigureAdditionalHttpMessageHandlers(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Collections.Generic.IList<System.Net.Http.DelegatingHandler>, System.IServiceProvider> configureAdditionalHandlers) { throw null; }
+        //***
+
+
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder AddHttpMessageHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Func<System.IServiceProvider, System.Net.Http.DelegatingHandler> configureHandler) { throw null; }
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder AddHttpMessageHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Func<System.Net.Http.DelegatingHandler> configureHandler) { throw null; }
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder AddHttpMessageHandler<THandler>(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder) where THandler : System.Net.Http.DelegatingHandler { throw null; }
@@ -24,6 +35,9 @@ namespace Microsoft.Extensions.DependencyInjection
     }
     public static partial class HttpClientFactoryServiceCollectionExtensions
     {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHttpClientDefaults(Microsoft.Extensions.DependencyInjection.IServiceCollection services) { throw null; } //****
+
+
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddHttpClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { throw null; }
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder AddHttpClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name) { throw null; }
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder AddHttpClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Action<System.IServiceProvider, System.Net.Http.HttpClient> configureClient) { throw null; }
@@ -80,6 +94,14 @@ namespace Microsoft.Extensions.Http
     public partial interface ITypedHttpClientFactory<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembersAttribute(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicConstructors)] TClient>
     {
         TClient CreateClient(System.Net.Http.HttpClient httpClient);
+    }
+
+    // ****
+
+    public partial interface IHttpClientLoggingOptions
+    {
+        IHttpClientLoggingOptions ClearProviders();
+        IHttpClientLoggingOptions AddDefaultProviders();
     }
 }
 namespace Microsoft.Extensions.Http.Logging

@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Http.Logging;
 
 namespace Microsoft.Extensions.Http
 {
@@ -102,6 +103,15 @@ namespace Microsoft.Extensions.Http
             HttpMessageHandler handler = CreateHandler(name);
             var client = new HttpClient(handler, disposeHandler: false);
 
+            HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.GetDefaultOptions(_optionsMonitor);
+            if (defaultOptions is not null)
+            {
+                for (int i = 0; i < defaultOptions.HttpClientActions.Count; i++)
+                {
+                    defaultOptions.HttpClientActions[i](client);
+                }
+            }
+
             HttpClientFactoryOptions options = _optionsMonitor.Get(name);
             for (int i = 0; i < options.HttpClientActions.Count; i++)
             {
@@ -140,18 +150,42 @@ namespace Microsoft.Extensions.Http
                 HttpMessageHandlerBuilder builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
                 builder.Name = name;
 
+                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.GetDefaultOptions(_optionsMonitor);
+                // apply all defaults before filters etc
+                if (defaultOptions is not null)
+                {
+                    if (defaultOptions._httpMessageHandlerBuilderActions != null)
+                    {
+                        throw new NotSupportedException("Don't configure HttpMessageHandlerBuilderActions for Defaults, use other configuration methods");
+                    }
+                    if (!options._disregardDefaultsPrimaryHandler)
+                    {
+                        for (int i = 0; i < defaultOptions.PrimaryHandlerActions.Count; i++)
+                        {
+                            defaultOptions.PrimaryHandlerActions[i](builder);
+                        }
+                    }
+                    for (int i = 0; i < defaultOptions.AdditionalHandlersActions.Count; i++)
+                    {
+                        defaultOptions.AdditionalHandlersActions[i](builder);
+                    }
+                }
+
                 // This is similar to the initialization pattern in:
                 // https://github.com/aspnet/Hosting/blob/e892ed8bbdcd25a0dafc1850033398dc57f65fe1/src/Microsoft.AspNetCore.Hosting/Internal/WebHost.cs#L188
-                Action<HttpMessageHandlerBuilder> configure = Configure;
+                Action<HttpMessageHandlerBuilder> configure = Configure; // contains all ordinary actions from options (see definition below)
                 for (int i = _filters.Length - 1; i >= 0; i--)
                 {
-                    configure = _filters[i].Configure(configure);
+                    configure = _filters[i].Configure(configure); // filters can choose to be called before and/or after the ordinary builder actions
                 }
 
                 configure(builder);
 
                 // Wrap the handler so we can ensure the inner handler outlives the outer handler.
                 var handler = new LifetimeTrackingHttpMessageHandler(builder.Build());
+
+                // options.HandlerLifetime property will fall back to DefaultHandlerLifetime if not set, for backward compatibility. Querying the underlying field instead
+                TimeSpan handlerLifetime = options._handlerLifetime ?? defaultOptions?._handlerLifetime ?? HttpClientFactoryOptions.DefaultHandlerLifetime;
 
                 // Note that we can't start the timer here. That would introduce a very very subtle race condition
                 // with very short expiry times. We need to wait until we've actually handed out the handler once
@@ -160,13 +194,45 @@ namespace Microsoft.Extensions.Http
                 // Otherwise it would be possible that we start the timer here, immediately expire it (very short
                 // timer) and then dispose it without ever creating a client. That would be bad. It's unlikely
                 // this would happen, but we want to be sure.
-                return new ActiveHandlerTrackingEntry(name, handler, scope, options.HandlerLifetime);
+                return new ActiveHandlerTrackingEntry(name, handler, scope, handlerLifetime);
 
                 void Configure(HttpMessageHandlerBuilder b)
                 {
-                    for (int i = 0; i < options.HttpMessageHandlerBuilderActions.Count; i++)
+                    for (int i = 0; i < options.PrimaryHandlerActions.Count; i++)
                     {
-                        options.HttpMessageHandlerBuilderActions[i](b);
+                        options.PrimaryHandlerActions[i](b);
+                    }
+                    for (int i = 0; i < options.AdditionalHandlersActions.Count; i++)
+                    {
+                        options.AdditionalHandlersActions[i](b);
+                    }
+
+                    // using HttpMessageHandlerBuilderActions property getter has consequences (for backward compatibility), querying field instead
+                    if (options._httpMessageHandlerBuilderActions != null)
+                    {
+                        for (int i = 0; i < options._httpMessageHandlerBuilderActions.Count; i++)
+                        {
+                            options._httpMessageHandlerBuilderActions[i](b);
+                        }
+                    }
+
+                    // adding logging at the end
+                    if (options.LoggingOptions is not null)
+                    {
+                        if (options.LoggingOptions is DefaultHttpClientLoggingOptions loggingOptions)
+                        {
+                            for (int i = 0; i < loggingOptions.AdditionalHandlersActions.Count; i++)
+                            {
+                                loggingOptions.AdditionalHandlersActions[i](b);
+                            }
+                        }
+                    }
+                    else if (defaultOptions?.LoggingOptions is DefaultHttpClientLoggingOptions defaultLoggingOptions)
+                    {
+                        for (int i = 0; i < defaultLoggingOptions.AdditionalHandlersActions.Count; i++)
+                        {
+                            defaultLoggingOptions.AdditionalHandlersActions[i](b);
+                        }
                     }
                 }
             }

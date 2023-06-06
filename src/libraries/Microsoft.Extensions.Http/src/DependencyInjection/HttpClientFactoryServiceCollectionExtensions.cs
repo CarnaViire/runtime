@@ -87,6 +87,26 @@ namespace Microsoft.Extensions.DependencyInjection
 
         /// <summary>
         /// Adds the <see cref="IHttpClientFactory"/> and related services to the <see cref="IServiceCollection"/> and configures
+        /// defaults for all <see cref="HttpClient"/>s.
+        /// </summary>
+        /// <param name="services">The <see cref="IServiceCollection"/>.</param>
+        /// <returns>An <see cref="IHttpClientBuilder"/> that can be used to configure the client defaults.</returns>
+        /// <remarks>
+        /// <para>
+        /// The defaults will be applied to all <see cref="HttpClient"/> instances for all configurations, before name-specific congfiguration is applied.
+        /// </para>
+        /// </remarks>
+        public static IHttpClientBuilder AddHttpClientDefaults(this IServiceCollection services)
+        {
+            ThrowHelper.ThrowIfNull(services);
+
+            AddHttpClient(services);
+
+            return new DefaultHttpClientBuilder(services, HttpClientFactoryOptions.AllClientDefaultsName, isAllClientDefaults: true);
+        }
+
+        /// <summary>
+        /// Adds the <see cref="IHttpClientFactory"/> and related services to the <see cref="IServiceCollection"/> and configures
         /// a named <see cref="HttpClient"/>.
         /// </summary>
         /// <param name="services">The <see cref="IServiceCollection"/>.</param>

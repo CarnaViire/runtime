@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.Http
 {
@@ -19,12 +20,108 @@ namespace Microsoft.Extensions.Http
         // IMPORTANT: This is used in a resource string. Update the resource if this changes.
         internal static readonly TimeSpan MinimumHandlerLifetime = TimeSpan.FromSeconds(1);
 
-        private TimeSpan _handlerLifetime = TimeSpan.FromMinutes(2);
+        internal const string AllClientDefaultsName = "Default"; // TODO decide what to do with default name
+        internal static readonly TimeSpan DefaultHandlerLifetime = TimeSpan.FromMinutes(2);
+
+#if NET5_0_OR_GREATER
+        internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
+#else
+        internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
+#endif
+
+        internal static HttpClientFactoryOptions? GetDefaultOptions(IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor)
+        {
+            HttpClientFactoryOptions defaultOptions = optionsMonitor.Get(HttpClientFactoryOptions.AllClientDefaultsName);
+            if (defaultOptions._isAllClientDefaults is not true)
+            {
+                return null; // user has not configured any defaults (_isAllClientDefaults == null) or overridden AllClientDefaultsName with their own client (_isAllClientDefaults == false)
+            }
+            return defaultOptions;
+        }
+
+        internal TimeSpan? _handlerLifetime; // we need to differentiate between backward-compatible default and users manually setting 2 mins
+        internal bool? _isAllClientDefaults; // we need to differentiate between a new empty object and an already configured object
+        internal bool _disregardDefaultsPrimaryHandler;
+
+        internal List<Action<HttpMessageHandlerBuilder>>? _httpMessageHandlerBuilderActions;
+        internal List<Action<IPrimaryHandlerBuilder>>? _primaryHandlerActions = new List<Action<IPrimaryHandlerBuilder>>();
+        internal List<Action<IAdditionalHandlersBuilder>>? _additionalHandlersActions = new List<Action<IAdditionalHandlersBuilder>>();
+
+        internal IHttpClientLoggingOptions? LoggingOptions { get; set; }
 
         /// <summary>
         /// Gets a list of operations used to configure an <see cref="HttpMessageHandlerBuilder"/>.
         /// </summary>
-        public IList<Action<HttpMessageHandlerBuilder>> HttpMessageHandlerBuilderActions { get; } = new List<Action<HttpMessageHandlerBuilder>>();
+        public IList<Action<HttpMessageHandlerBuilder>> HttpMessageHandlerBuilderActions
+        {
+            get
+            {
+                if (_httpMessageHandlerBuilderActions == null)
+                {
+                    if (_isAllClientDefaults is true)
+                    {
+                        throw new NotSupportedException("Don't configure HttpMessageHandlerBuilderActions directly, use other configuration methods");
+                    }
+
+                    // fallback to unified collection to retain order
+                    _httpMessageHandlerBuilderActions = LegacyCombineHandlersActions();
+                    // all new actions should be added to unified collection
+                    _primaryHandlerActions = null;
+                    _additionalHandlersActions = null;
+                }
+
+                return _httpMessageHandlerBuilderActions;
+            }
+        }
+        internal IReadOnlyList<Action<IPrimaryHandlerBuilder>> PrimaryHandlerActions => (IReadOnlyList<Action<IPrimaryHandlerBuilder>>?)_primaryHandlerActions ?? Array.Empty<Action<IPrimaryHandlerBuilder>>();
+        internal IReadOnlyList<Action<IAdditionalHandlersBuilder>> AdditionalHandlersActions => (IReadOnlyList<Action<IAdditionalHandlersBuilder>>?)_additionalHandlersActions ?? Array.Empty<Action<IAdditionalHandlersBuilder>>();
+
+        internal void AddPrimaryHandlerAction(Action<IPrimaryHandlerBuilder> action, bool disregardPreviousActions = true)
+        {
+            if (_primaryHandlerActions != null)
+            {
+                if (disregardPreviousActions)
+                {
+                    _primaryHandlerActions.Clear();
+                    _disregardDefaultsPrimaryHandler = true;
+                }
+                _primaryHandlerActions.Add(action);
+            }
+            else
+            {
+                // can't optimize in case of a unified collection
+                HttpMessageHandlerBuilderActions.Add(action);
+            }
+        }
+
+        internal void AddAdditionalHandlersAction(Action<IAdditionalHandlersBuilder> action)
+        {
+            if (_additionalHandlersActions != null)
+            {
+                _additionalHandlersActions.Add(action);
+            }
+            else
+            {
+                HttpMessageHandlerBuilderActions.Add(action);
+            }
+        }
+
+        private List<Action<HttpMessageHandlerBuilder>> LegacyCombineHandlersActions()
+        {
+            var httpMessageHandlerBuilderActions = new List<Action<HttpMessageHandlerBuilder>>();
+
+            foreach (Action<IPrimaryHandlerBuilder> action in PrimaryHandlerActions)
+            {
+                httpMessageHandlerBuilderActions.Add(action);
+            }
+
+            foreach (Action<IAdditionalHandlersBuilder> action in AdditionalHandlersActions)
+            {
+                httpMessageHandlerBuilderActions.Add(action);
+            }
+
+            return httpMessageHandlerBuilderActions;
+        }
 
         /// <summary>
         /// Gets a list of operations used to configure an <see cref="HttpClient"/>.
@@ -57,7 +154,7 @@ namespace Microsoft.Extensions.Http
         /// </remarks>
         public TimeSpan HandlerLifetime
         {
-            get => _handlerLifetime;
+            get => _handlerLifetime ?? DefaultHandlerLifetime; // for backward compatibility
             set
             {
                 if (value != Timeout.InfiniteTimeSpan && value < MinimumHandlerLifetime)
