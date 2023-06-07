@@ -102,6 +102,8 @@ namespace Microsoft.Extensions.Http
     {
         IHttpClientLoggingOptions ClearProviders();
         IHttpClientLoggingOptions AddDefaultProviders();
+        IHttpClientLoggingOptions AddRequestStartProvider(System.Func<System.Net.Http.HttpRequestMessage, string> getRequestStartMessage, Microsoft.Extensions.Logging.LogLevel level);
+        IHttpClientLoggingOptions AddRequestEndProvider(System.Func<System.Net.Http.HttpRequestMessage, System.TimeSpan, System.Net.Http.HttpResponseMessage?, System.Exception?, string> getRequestEndMessage, Microsoft.Extensions.Logging.LogLevel level);
     }
 }
 namespace Microsoft.Extensions.Http.Logging

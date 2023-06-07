@@ -24,7 +24,7 @@ namespace Microsoft.Extensions.Http
         internal static readonly TimeSpan DefaultHandlerLifetime = TimeSpan.FromMinutes(2);
 
 #if NET5_0_OR_GREATER
-        internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
+        internal static HttpMessageHandler NewDefaultPrimaryHandler() => SocketsHttpHandler.IsSupported ? new SocketsHttpHandler() : new HttpClientHandler();
 #else
         internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
 #endif
