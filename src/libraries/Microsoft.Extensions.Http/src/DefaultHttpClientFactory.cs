@@ -103,7 +103,7 @@ namespace Microsoft.Extensions.Http
             HttpMessageHandler handler = CreateHandler(name);
             var client = new HttpClient(handler, disposeHandler: false);
 
-            HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.GetDefaultOptions(_optionsMonitor);
+            HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
             if (defaultOptions is not null)
             {
                 for (int i = 0; i < defaultOptions.HttpClientActions.Count; i++)
@@ -150,7 +150,7 @@ namespace Microsoft.Extensions.Http
                 HttpMessageHandlerBuilder builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
                 builder.Name = name;
 
-                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.GetDefaultOptions(_optionsMonitor);
+                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
                 // apply all defaults before filters etc
                 if (defaultOptions is not null)
                 {

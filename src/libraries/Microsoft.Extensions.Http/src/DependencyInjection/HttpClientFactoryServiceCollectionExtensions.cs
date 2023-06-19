@@ -102,7 +102,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             AddHttpClient(services);
 
-            return new DefaultHttpClientBuilder(services, HttpClientFactoryOptions.AllClientDefaultsName, isAllClientDefaults: true);
+            return new DefaultHttpClientBuilder(services, name: null!);
         }
 
         /// <summary>

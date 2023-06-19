@@ -38,7 +38,7 @@ namespace Microsoft.Extensions.Http
                     return; // logging is configured via IHttpClientBuilder.ConfigureLogging
                 }
 
-                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.GetDefaultOptions(_optionsMonitor);
+                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
                 if (defaultOptions?.LoggingOptions is not null)
                 {
                     return; // logging is configured via HttpClientFactoryOptions defaults

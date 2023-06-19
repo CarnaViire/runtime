@@ -1,39 +1,42 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Net.Http;
 using Microsoft.Extensions.Http;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
     internal sealed class DefaultHttpClientBuilder : IHttpClientBuilder
     {
-        public DefaultHttpClientBuilder(IServiceCollection services, string name, bool isAllClientDefaults = false)
+        public DefaultHttpClientBuilder(IServiceCollection services, string name)
         {
             Services = services;
             Name = name;
-            IsAllClientDefaults = isAllClientDefaults;
 
-            if (isAllClientDefaults)
+            if (name is null && HttpClientFactoryOptions.Default is null) // default instance first-time config
             {
-                services.Configure<HttpClientFactoryOptions>(name, options =>
+                HttpClientFactoryOptions.InitDefault(d =>
                 {
-                    if (options._isAllClientDefaults is null) // first-time config
+                    d._handlerLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;
+                    d.AddPrimaryHandlerAction(b =>
                     {
-                        options._isAllClientDefaults = true;
-                        options._handlerLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;
-                    }
+                        b.PrimaryHandler = HttpClientFactoryOptions.NewDefaultPrimaryHandler();
+
+#if NET5_0_OR_GREATER
+                        if (b.PrimaryHandler is SocketsHttpHandler socketsHttpHandler)
+                        {
+                            socketsHttpHandler.UseCookies = false;
+                            socketsHttpHandler.PooledConnectionLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;
+                        }
+#endif
+                    },
+                    disregardPreviousActions: true);
                 });
-            }
-            else
-            {
-                services.Configure<HttpClientFactoryOptions>(name, options => options._isAllClientDefaults = false);
             }
         }
 
         public string Name { get; }
 
         public IServiceCollection Services { get; }
-
-        internal bool IsAllClientDefaults { get; }
     }
 }

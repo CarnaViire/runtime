@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 namespace Microsoft.Extensions.Http
 {
@@ -20,7 +19,6 @@ namespace Microsoft.Extensions.Http
         // IMPORTANT: This is used in a resource string. Update the resource if this changes.
         internal static readonly TimeSpan MinimumHandlerLifetime = TimeSpan.FromSeconds(1);
 
-        internal const string AllClientDefaultsName = "Default"; // TODO decide what to do with default name
         internal static readonly TimeSpan DefaultHandlerLifetime = TimeSpan.FromMinutes(2);
 
 #if NET5_0_OR_GREATER
@@ -29,18 +27,21 @@ namespace Microsoft.Extensions.Http
         internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
 #endif
 
-        internal static HttpClientFactoryOptions? GetDefaultOptions(IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor)
+        internal static HttpClientFactoryOptions? Default { get; private set; }
+
+        internal static void InitDefault(Action<HttpClientFactoryOptions> configure)
         {
-            HttpClientFactoryOptions defaultOptions = optionsMonitor.Get(HttpClientFactoryOptions.AllClientDefaultsName);
-            if (defaultOptions._isAllClientDefaults is not true)
+            if (Default is not null)
             {
-                return null; // user has not configured any defaults (_isAllClientDefaults == null) or overridden AllClientDefaultsName with their own client (_isAllClientDefaults == false)
+                throw new InvalidOperationException();
             }
-            return defaultOptions;
+            Default = new HttpClientFactoryOptions();
+            Default._isDefaultInstance = true;
+            configure(Default);
         }
 
         internal TimeSpan? _handlerLifetime; // we need to differentiate between backward-compatible default and users manually setting 2 mins
-        internal bool? _isAllClientDefaults; // we need to differentiate between a new empty object and an already configured object
+        internal bool _isDefaultInstance;
         internal bool _disregardDefaultsPrimaryHandler;
 
         internal List<Action<HttpMessageHandlerBuilder>>? _httpMessageHandlerBuilderActions;
@@ -58,7 +59,7 @@ namespace Microsoft.Extensions.Http
             {
                 if (_httpMessageHandlerBuilderActions == null)
                 {
-                    if (_isAllClientDefaults is true)
+                    if (_isDefaultInstance is true)
                     {
                         throw new NotSupportedException("Don't configure HttpMessageHandlerBuilderActions directly, use other configuration methods");
                     }
@@ -76,7 +77,7 @@ namespace Microsoft.Extensions.Http
         internal IReadOnlyList<Action<IPrimaryHandlerBuilder>> PrimaryHandlerActions => (IReadOnlyList<Action<IPrimaryHandlerBuilder>>?)_primaryHandlerActions ?? Array.Empty<Action<IPrimaryHandlerBuilder>>();
         internal IReadOnlyList<Action<IAdditionalHandlersBuilder>> AdditionalHandlersActions => (IReadOnlyList<Action<IAdditionalHandlersBuilder>>?)_additionalHandlersActions ?? Array.Empty<Action<IAdditionalHandlersBuilder>>();
 
-        internal void AddPrimaryHandlerAction(Action<IPrimaryHandlerBuilder> action, bool disregardPreviousActions = true)
+        internal void AddPrimaryHandlerAction(Action<IPrimaryHandlerBuilder> action, bool disregardPreviousActions)
         {
             if (_primaryHandlerActions != null)
             {
