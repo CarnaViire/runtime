@@ -22,6 +22,60 @@ namespace Microsoft.Extensions.DependencyInjection
     // These are mostly integration tests that verify the configuration experience.
     public class HttpClientFactoryServiceCollectionExtensionsTest
     {
+#if NET5_0_OR_GREATER
+        [Fact]
+        public void Test()
+        {
+            var serviceCollection = new ServiceCollection();
+
+            serviceCollection.AddHttpClientDefaults()
+                .UseSocketsHttpHandler((ISocketsHttpHandlerBuilder b) =>
+                    b.SetPooledConnectionLifetime(TimeSpan.FromMinutes(1))
+                        .Configure(s => s.MaxConnectionsPerServer = 5)
+                        .SetConnectTimeout(TimeSpan.FromSeconds(15)));
+
+            serviceCollection.AddHttpClient("test-2")
+                .UseSocketsHttpHandler((ISocketsHttpHandlerBuilder b) =>
+                    b.Configure(s => s.MaxConnectionsPerServer = 6));
+
+            var services = serviceCollection.BuildServiceProvider();
+
+            var factory = services.GetRequiredService<IHttpMessageHandlerFactory>();
+
+            var handler = factory.CreateHandler("test");
+
+            while (handler is DelegatingHandler)
+            {
+                handler = ((DelegatingHandler)handler).InnerHandler;
+            }
+
+            var socketsHandler = Assert.IsType<SocketsHttpHandler>(handler);
+
+            Assert.Equal(TimeSpan.FromMinutes(1), socketsHandler.PooledConnectionLifetime);
+            Assert.Equal(5, socketsHandler.MaxConnectionsPerServer);
+            Assert.Equal(TimeSpan.FromSeconds(15), socketsHandler.ConnectTimeout);
+
+
+
+
+            handler = factory.CreateHandler("test-2");
+
+            while (handler is DelegatingHandler)
+            {
+                handler = ((DelegatingHandler)handler).InnerHandler;
+            }
+
+            socketsHandler = Assert.IsType<SocketsHttpHandler>(handler);
+
+            Assert.Equal(TimeSpan.FromMinutes(1), socketsHandler.PooledConnectionLifetime);
+            Assert.Equal(6, socketsHandler.MaxConnectionsPerServer);
+            Assert.Equal(TimeSpan.FromSeconds(15), socketsHandler.ConnectTimeout);
+
+
+        }
+#endif
+
+
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))] // Verifies that AddHttpClient is enough to get the factory and make clients.
         public void AddHttpClient_IsSelfContained_CanCreateClient()
         {
@@ -1395,7 +1449,7 @@ namespace Microsoft.Extensions.DependencyInjection
             {
 #if NETFRAMEWORK
                 request.Properties[nameof(ScopedService)] = Service;
-#else                
+#else
                 request.Options.Set(new HttpRequestOptionsKey<ScopedService>(nameof(ScopedService)), Service);
 #endif
                 return Task.FromResult(new HttpResponseMessage());

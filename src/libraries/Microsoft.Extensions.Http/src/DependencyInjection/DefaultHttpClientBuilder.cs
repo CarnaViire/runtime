@@ -23,7 +23,7 @@ namespace Microsoft.Extensions.DependencyInjection
                         b.PrimaryHandler = HttpClientFactoryOptions.NewDefaultPrimaryHandler();
 
 #if NET5_0_OR_GREATER
-                        if (b.PrimaryHandler is SocketsHttpHandler socketsHttpHandler)
+                        if (SocketsHttpHandler.IsSupported && b.PrimaryHandler is SocketsHttpHandler socketsHttpHandler)
                         {
                             socketsHttpHandler.UseCookies = false;
                             socketsHttpHandler.PooledConnectionLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;

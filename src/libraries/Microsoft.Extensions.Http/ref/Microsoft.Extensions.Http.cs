@@ -9,7 +9,13 @@ namespace Microsoft.Extensions.DependencyInjection
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigurePrimaryHttpMessageHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.HttpMessageHandler, System.IServiceProvider> configureHandler) { throw null; }
 #if NET5_0_OR_GREATER
         [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
-        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigurePrimarySocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler, System.IServiceProvider> configureHandler) { throw null; }
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder UseSocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<Microsoft.Extensions.DependencyInjection.ISocketsHttpHandlerBuilder> configureBuilder) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder UseSocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder UseSocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler> configureHandler) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder UseSocketsHttpHandler(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler, System.IServiceProvider> configureHandler) { throw null; }
 #endif
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigureLogging(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<Microsoft.Extensions.Http.IHttpClientLoggingOptions> configure) { throw null; }
         public static Microsoft.Extensions.DependencyInjection.IHttpClientBuilder ConfigureAdditionalHttpMessageHandlers(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder builder, System.Action<System.Collections.Generic.IList<System.Net.Http.DelegatingHandler>, System.IServiceProvider> configureAdditionalHandlers) { throw null; }
@@ -64,6 +70,39 @@ namespace Microsoft.Extensions.DependencyInjection
         string Name { get; }
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
     }
+#if NET5_0_OR_GREATER
+    public partial interface ISocketsHttpHandlerBuilder
+    {
+        string Name { get; }
+        Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+
+    public static partial class SocketsHttpHandlerBuilderExtensions
+    {
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder Configure(this ISocketsHttpHandlerBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler, System.IServiceProvider> configure) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder Configure(this ISocketsHttpHandlerBuilder builder, System.Action<System.Net.Http.SocketsHttpHandler> configure) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetAllowAutoRedirect(this ISocketsHttpHandlerBuilder builder, bool allowAutoRedirect) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetUseCookies(this ISocketsHttpHandlerBuilder builder, bool useCookies) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetMaxConnectionsPerServer(this ISocketsHttpHandlerBuilder builder, int maxConnectionsPerServer) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetAutomaticDecompression(this ISocketsHttpHandlerBuilder builder, System.Net.DecompressionMethods automaticDecompression) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetConnectTimeout(this ISocketsHttpHandlerBuilder builder, System.TimeSpan connectTimeout) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetPooledConnectionLifetime(this ISocketsHttpHandlerBuilder builder, System.TimeSpan pooledConnectionLifetime) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetPooledConnectionIdleTimeout(this ISocketsHttpHandlerBuilder builder, System.TimeSpan pooledConnectionIdleTimeout) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetKeepAlivePingDelay(this ISocketsHttpHandlerBuilder builder, System.TimeSpan keepAlivePingDelay) { throw null; }
+        [System.Runtime.Versioning.UnsupportedOSPlatformAttribute("browser")]
+        public static ISocketsHttpHandlerBuilder SetKeepAlivePingTimeout(this ISocketsHttpHandlerBuilder builder, System.TimeSpan keepAlivePingTimeout) { throw null; }
+    }
+#endif
 }
 namespace Microsoft.Extensions.Http
 {

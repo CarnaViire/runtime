@@ -155,7 +155,7 @@ namespace Microsoft.Extensions.DependencyInjection
     {
         private SocketsHttpHandlerOptions _options;
         internal SocketsHttpHandlerOptions Options => _options;
-        internal void CleanOptions() => _options = new();
+        internal void CleanOptions() => _options = SocketsHttpHandlerOptions.New();
         internal void UpdateOptions(Func<SocketsHttpHandlerOptions, SocketsHttpHandlerOptions> updateOptions)
         {
             _options = updateOptions(_options) with { Modified = true };
@@ -189,7 +189,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             if (options.Modified)
             {
-                AddPrimaryHandlerAction(builder, handler => options.Apply(handler));
+                AddPrimaryHandlerAction(builder, options.Apply);
             }
 
             //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
@@ -225,7 +225,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             if (options.Modified)
             {
-                AddPrimaryHandlerAction(builder, handler => options.Apply(handler));
+                AddPrimaryHandlerAction(builder, options.Apply);
             }
 
             AddPrimaryHandlerAction(builder, configure);
@@ -233,16 +233,18 @@ namespace Microsoft.Extensions.DependencyInjection
             return builder;
         }
 
+        [UnsupportedOSPlatform("browser")]
         internal static void Build(this ISocketsHttpHandlerBuilder builder)
         {
             if (builder is DefaultSocketsHttpHandlerBuilder db && db.Options.Modified)
             {
                 SocketsHttpHandlerOptions options = db.Options;
                 db.CleanOptions();
-                AddPrimaryHandlerAction(builder, handler => options.Apply(handler));
+                AddPrimaryHandlerAction(builder, options.Apply);
             }
         }
 
+        [UnsupportedOSPlatform("browser")]
         private static bool TryUpdateOptions(this ISocketsHttpHandlerBuilder builder, Func<SocketsHttpHandlerOptions, SocketsHttpHandlerOptions> updateOptions)
         {
             if (builder is DefaultSocketsHttpHandlerBuilder db)
@@ -256,6 +258,7 @@ namespace Microsoft.Extensions.DependencyInjection
             }
         }
 
+        [UnsupportedOSPlatform("browser")]
         private static void AddPrimaryHandlerAction(this ISocketsHttpHandlerBuilder builder,  Action<SocketsHttpHandler> configure)
         {
             //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
@@ -403,6 +406,11 @@ namespace Microsoft.Extensions.DependencyInjection
 
     internal record struct SocketsHttpHandlerOptions
     {
+        public static SocketsHttpHandlerOptions New()
+        {
+            return new SocketsHttpHandlerOptions() { Modified = false };
+        }
+
         public bool Modified { get; init; }
 
         public bool? AllowAutoRedirect { get; init; }
@@ -425,6 +433,7 @@ namespace Microsoft.Extensions.DependencyInjection
         public bool? UseCookies { get; init; }
         public bool? UseProxy { get; init; }
 
+        [UnsupportedOSPlatform("browser")]
         public void Apply(SocketsHttpHandler handler)
         {
             handler.AllowAutoRedirect = AllowAutoRedirect ?? handler.AllowAutoRedirect;
