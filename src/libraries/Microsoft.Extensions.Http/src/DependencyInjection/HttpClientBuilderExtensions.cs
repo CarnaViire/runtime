@@ -30,13 +30,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureClient);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.HttpClientActions.Add(configureClient);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options => options.HttpClientActions.Add(configureClient));
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options => options.HttpClientActions.Add(configureClient));
 
             return builder;
         }
@@ -87,13 +81,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureHandler);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(configureHandler()));
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(configureHandler()));
             });
@@ -121,13 +109,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureHandler);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(configureHandler(b.Services)));
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(configureHandler(b.Services)));
             });
@@ -154,13 +136,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(b.Services.GetRequiredService<THandler>()));
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddAdditionalHandlersAction(b => b.AdditionalHandlers.Add(b.Services.GetRequiredService<THandler>()));
             });
@@ -184,13 +160,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureHandler);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(b => b.PrimaryHandler = configureHandler(), disregardPreviousActions: true);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddPrimaryHandlerAction(b => b.PrimaryHandler = configureHandler(), disregardPreviousActions: true);
             });
@@ -220,13 +190,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureHandler);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(b => b.PrimaryHandler = configureHandler(b.Services), disregardPreviousActions: true);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddPrimaryHandlerAction(b => b.PrimaryHandler = configureHandler(b.Services), disregardPreviousActions: true);
             });
@@ -254,13 +218,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(b => b.PrimaryHandler = b.Services.GetRequiredService<THandler>(), disregardPreviousActions: true);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddPrimaryHandlerAction(b => b.PrimaryHandler = b.Services.GetRequiredService<THandler>(), disregardPreviousActions: true);
             });
@@ -285,18 +243,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(b =>
-                {
-                    // accessing PrimaryHandler property will create a new default instance if needed
-                    configureHandler(b.PrimaryHandler, b.Services);
-                },
-                disregardPreviousActions: false);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddPrimaryHandlerAction(b =>
                 {
@@ -313,14 +260,7 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.LoggingOptions ??= new DefaultHttpClientLoggingOptions();
-                configure(HttpClientFactoryOptions.Default!.LoggingOptions);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.LoggingOptions ??= new DefaultHttpClientLoggingOptions();
                 configure(options.LoggingOptions);
@@ -375,7 +315,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configureAdditionalHandlers);
 
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.AddAdditionalHandlersAction(b => configureAdditionalHandlers(b.AdditionalHandlers, b.Services));
             });
@@ -611,7 +551,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(shouldRedactHeaderValue);
 
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 options.ShouldRedactHeaderValue = shouldRedactHeaderValue;
             });
@@ -630,7 +570,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(redactedLoggedHeaderNames);
 
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
                 var sensitiveHeaders = new HashSet<string>(redactedLoggedHeaderNames, StringComparer.OrdinalIgnoreCase);
 
@@ -673,7 +613,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 throw new ArgumentException(SR.HandlerLifetime_InvalidValue, nameof(handlerLifetime));
             }
 
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options => options.HandlerLifetime = handlerLifetime);
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options => options.HandlerLifetime = handlerLifetime);
             return builder;
         }
 

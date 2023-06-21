@@ -34,31 +34,24 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            Action<IPrimaryHandlerBuilder> action = b =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
-                SocketsHttpHandler socketsHttpHandler;
-                if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                options.AddPrimaryHandlerAction(b =>
                 {
-                    socketsHttpHandler = dhmhbSocketsHandler;
-                }
-                else
-                {
-                    socketsHttpHandler = new SocketsHttpHandler();
-                }
+                    SocketsHttpHandler socketsHttpHandler;
+                    if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                    {
+                        socketsHttpHandler = dhmhbSocketsHandler;
+                    }
+                    else
+                    {
+                        socketsHttpHandler = new SocketsHttpHandler();
+                    }
 
-                configureHandler(socketsHttpHandler, b.Services);
-                b.PrimaryHandler = socketsHttpHandler;
-            };
-
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-                return builder;
-            }
-
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
-            {
-                options.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
+                    configureHandler(socketsHttpHandler, b.Services);
+                    b.PrimaryHandler = socketsHttpHandler;
+                },
+                disregardPreviousActions: false);
             });
 
             return builder;
@@ -74,33 +67,24 @@ namespace Microsoft.Extensions.DependencyInjection
         public static IHttpClientBuilder UseSocketsHttpHandler(this IHttpClientBuilder builder, Action<ISocketsHttpHandlerBuilder> configureBuilder)
         {
             ThrowHelper.ThrowIfNull(builder);
-
-            Action<IPrimaryHandlerBuilder> action = b =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
-                SocketsHttpHandler socketsHttpHandler;
-                if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                options.AddPrimaryHandlerAction(b =>
                 {
-                    socketsHttpHandler = dhmhbSocketsHandler;
-                }
-                else
-                {
-                    socketsHttpHandler = new SocketsHttpHandler();
-                }
+                    SocketsHttpHandler socketsHttpHandler;
+                    if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                    {
+                        socketsHttpHandler = dhmhbSocketsHandler;
+                    }
+                    else
+                    {
+                        socketsHttpHandler = new SocketsHttpHandler();
+                    }
 
-                b.PrimaryHandler = socketsHttpHandler;
-            };
-
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-            }
-            else
-            {
-                builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
-                {
-                    options.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-                });
-            }
+                    b.PrimaryHandler = socketsHttpHandler;
+                },
+                disregardPreviousActions: false);
+            });
 
             var handlerBuilder = new DefaultSocketsHttpHandlerBuilder(builder);
             configureBuilder(handlerBuilder);
@@ -114,32 +98,24 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ThrowHelper.ThrowIfNull(builder);
 
-            Action<IPrimaryHandlerBuilder> action = b =>
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
-                SocketsHttpHandler socketsHttpHandler;
-                if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                options.AddPrimaryHandlerAction(b =>
                 {
-                    socketsHttpHandler = dhmhbSocketsHandler;
-                }
-                else
-                {
-                    socketsHttpHandler = new SocketsHttpHandler();
-                }
+                    SocketsHttpHandler socketsHttpHandler;
+                    if (b is DefaultHttpMessageHandlerBuilder dhb && dhb._primaryHandler is SocketsHttpHandler dhmhbSocketsHandler) // accessing field to avoid unnecessary creation of an HttpClientHandler
+                    {
+                        socketsHttpHandler = dhmhbSocketsHandler;
+                    }
+                    else
+                    {
+                        socketsHttpHandler = new SocketsHttpHandler();
+                    }
 
-                b.PrimaryHandler = socketsHttpHandler;
-            };
-
-            if (builder.Name is null)
-            {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-            }
-            else
-            {
-                builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
-                {
-                    options.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-                });
-            }
+                    b.PrimaryHandler = socketsHttpHandler;
+                },
+                disregardPreviousActions: false);
+            });
 
             return builder;
         }
@@ -180,32 +156,18 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configure);
 
-            SocketsHttpHandlerOptions options = default;
             if (builder is DefaultSocketsHttpHandlerBuilder db && db.Options.Modified)
             {
-                options = db.Options;
+                SocketsHttpHandlerOptions options = db.Options;
                 db.CleanOptions();
-            }
-
-            if (options.Modified)
-            {
                 AddPrimaryHandlerAction(builder, options.Apply);
             }
 
-            //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
-            Action<IPrimaryHandlerBuilder> action = b => configure((SocketsHttpHandler)b.PrimaryHandler, b.Services);
-
-            if (builder.Name is null)
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-            }
-            else
-            {
-                builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
-                {
-                    options.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-                });
-            }
+                //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
+                options.AddPrimaryHandlerAction(b => configure((SocketsHttpHandler)b.PrimaryHandler, b.Services), disregardPreviousActions: false);
+            });
 
             return builder;
         }
@@ -216,15 +178,10 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(configure);
 
-            SocketsHttpHandlerOptions options = default;
             if (builder is DefaultSocketsHttpHandlerBuilder db && db.Options.Modified)
             {
-                options = db.Options;
+                SocketsHttpHandlerOptions options = db.Options;
                 db.CleanOptions();
-            }
-
-            if (options.Modified)
-            {
                 AddPrimaryHandlerAction(builder, options.Apply);
             }
 
@@ -261,20 +218,13 @@ namespace Microsoft.Extensions.DependencyInjection
         [UnsupportedOSPlatform("browser")]
         private static void AddPrimaryHandlerAction(this ISocketsHttpHandlerBuilder builder,  Action<SocketsHttpHandler> configure)
         {
-            //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
             Action<IPrimaryHandlerBuilder> action = b => configure((SocketsHttpHandler)b.PrimaryHandler);
 
-            if (builder.Name is null)
+            builder.Services.ConfigureHttpClientFactoryOptions(builder.Name, options =>
             {
-                HttpClientFactoryOptions.Default!.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-            }
-            else
-            {
-                builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
-                {
-                    options.AddPrimaryHandlerAction(action, disregardPreviousActions: false);
-                });
-            }
+                //if SocketsHttpHandlerBuilder was created, it ensures PrimaryHandler is SocketsHttpHandler
+                options.AddPrimaryHandlerAction(b => configure((SocketsHttpHandler)b.PrimaryHandler), disregardPreviousActions: false);
+            });
         }
 
         [UnsupportedOSPlatform("browser")] // todo: what else do I need to set up PNSE?

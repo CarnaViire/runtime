@@ -6,9 +6,27 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Microsoft.Extensions.Http
 {
+    internal class HttpClientFactoryGlobalOptions // "singleton" option
+    {
+        private HttpClientFactoryOptions? _default;
+
+        [DisallowNull]
+        public HttpClientFactoryOptions? Default
+        {
+            get => _default;
+            set
+            {
+                ThrowHelper.ThrowIfNull(value);
+                _default = value;
+                _default._isDefaultInstance = true;
+            }
+        }
+    }
+
     /// <summary>
     /// An options class for configuring the default <see cref="IHttpClientFactory"/>.
     /// </summary>
@@ -26,19 +44,6 @@ namespace Microsoft.Extensions.Http
 #else
         internal static HttpMessageHandler NewDefaultPrimaryHandler() => new HttpClientHandler();
 #endif
-
-        internal static HttpClientFactoryOptions? Default { get; private set; }
-
-        internal static void InitDefault(Action<HttpClientFactoryOptions> configure)
-        {
-            if (Default is not null)
-            {
-                throw new InvalidOperationException();
-            }
-            Default = new HttpClientFactoryOptions();
-            Default._isDefaultInstance = true;
-            configure(Default);
-        }
 
         internal TimeSpan? _handlerLifetime; // we need to differentiate between backward-compatible default and users manually setting 2 mins
         internal bool _isDefaultInstance;

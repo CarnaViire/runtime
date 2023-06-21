@@ -13,14 +13,17 @@ namespace Microsoft.Extensions.Http
     {
         private readonly ILoggerFactory _loggerFactory;
         private readonly IOptionsMonitor<HttpClientFactoryOptions> _optionsMonitor;
+        private readonly IOptionsMonitor<HttpClientFactoryGlobalOptions> _globalOptionsMonitor;
 
-        public LoggingHttpMessageHandlerBuilderFilter(ILoggerFactory loggerFactory, IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor)
+        public LoggingHttpMessageHandlerBuilderFilter(ILoggerFactory loggerFactory, IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor, IOptionsMonitor<HttpClientFactoryGlobalOptions> globalOptionsMonitor)
         {
             ThrowHelper.ThrowIfNull(loggerFactory);
             ThrowHelper.ThrowIfNull(optionsMonitor);
+            ThrowHelper.ThrowIfNull(globalOptionsMonitor);
 
             _loggerFactory = loggerFactory;
             _optionsMonitor = optionsMonitor;
+            _globalOptionsMonitor = globalOptionsMonitor;
         }
 
         public Action<HttpMessageHandlerBuilder> Configure(Action<HttpMessageHandlerBuilder> next)
@@ -38,7 +41,7 @@ namespace Microsoft.Extensions.Http
                     return; // logging is configured via IHttpClientBuilder.ConfigureLogging
                 }
 
-                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
+                HttpClientFactoryOptions? defaultOptions = _globalOptionsMonitor.CurrentValue.Default;
                 if (defaultOptions?.LoggingOptions is not null)
                 {
                     return; // logging is configured via HttpClientFactoryOptions defaults

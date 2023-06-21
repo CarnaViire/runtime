@@ -23,6 +23,7 @@ namespace Microsoft.Extensions.Http
         private readonly IServiceProvider _services;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptionsMonitor<HttpClientFactoryOptions> _optionsMonitor;
+        private readonly IOptionsMonitor<HttpClientFactoryGlobalOptions> _globalOptionsMonitor;
         private readonly IHttpMessageHandlerBuilderFilter[] _filters;
         private readonly Func<string, Lazy<ActiveHandlerTrackingEntry>> _entryFactory;
 
@@ -64,17 +65,20 @@ namespace Microsoft.Extensions.Http
             IServiceScopeFactory scopeFactory,
             ILoggerFactory loggerFactory,
             IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor,
+            IOptionsMonitor<HttpClientFactoryGlobalOptions> globalOptionsMonitor,
             IEnumerable<IHttpMessageHandlerBuilderFilter> filters)
         {
             ThrowHelper.ThrowIfNull(services);
             ThrowHelper.ThrowIfNull(scopeFactory);
             ThrowHelper.ThrowIfNull(loggerFactory);
             ThrowHelper.ThrowIfNull(optionsMonitor);
+            ThrowHelper.ThrowIfNull(globalOptionsMonitor);
             ThrowHelper.ThrowIfNull(filters);
 
             _services = services;
             _scopeFactory = scopeFactory;
             _optionsMonitor = optionsMonitor;
+            _globalOptionsMonitor = globalOptionsMonitor;
             _filters = filters.ToArray();
 
             _logger = loggerFactory.CreateLogger<DefaultHttpClientFactory>();
@@ -103,7 +107,7 @@ namespace Microsoft.Extensions.Http
             HttpMessageHandler handler = CreateHandler(name);
             var client = new HttpClient(handler, disposeHandler: false);
 
-            HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
+            HttpClientFactoryOptions? defaultOptions = _globalOptionsMonitor.CurrentValue.Default;
             if (defaultOptions is not null)
             {
                 for (int i = 0; i < defaultOptions.HttpClientActions.Count; i++)
@@ -150,7 +154,7 @@ namespace Microsoft.Extensions.Http
                 HttpMessageHandlerBuilder builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
                 builder.Name = name;
 
-                HttpClientFactoryOptions? defaultOptions = HttpClientFactoryOptions.Default;
+                HttpClientFactoryOptions? defaultOptions = _globalOptionsMonitor.CurrentValue.Default;
                 // apply all defaults before filters etc
                 if (defaultOptions is not null)
                 {

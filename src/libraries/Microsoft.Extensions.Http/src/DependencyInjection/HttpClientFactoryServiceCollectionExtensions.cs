@@ -101,8 +101,51 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(services);
 
             AddHttpClient(services);
+            InitHttpClientFactoryDefaults(services);
 
             return new DefaultHttpClientBuilder(services, name: null!);
+        }
+
+        internal static void InitHttpClientFactoryDefaults(this IServiceCollection services)
+        {
+            services.Configure<HttpClientFactoryGlobalOptions>(o =>
+            {
+                if (o.Default is not null) // already initialized
+                {
+                    return;
+                }
+
+                var defaultOptions = new HttpClientFactoryOptions();
+
+                defaultOptions.HandlerLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;
+                defaultOptions.AddPrimaryHandlerAction(b =>
+                {
+                    b.PrimaryHandler = HttpClientFactoryOptions.NewDefaultPrimaryHandler();
+
+#if NET5_0_OR_GREATER
+                    if (SocketsHttpHandler.IsSupported && b.PrimaryHandler is SocketsHttpHandler socketsHttpHandler)
+                    {
+                        socketsHttpHandler.UseCookies = false;
+                        socketsHttpHandler.PooledConnectionLifetime = HttpClientFactoryOptions.DefaultHandlerLifetime;
+                    }
+#endif
+                },
+                disregardPreviousActions: true);
+
+                o.Default = defaultOptions;
+            });
+        }
+
+        internal static void ConfigureHttpClientFactoryOptions(this IServiceCollection services, string? name, Action<HttpClientFactoryOptions> configure)
+        {
+            if (name is null)
+            {
+                services.Configure<HttpClientFactoryGlobalOptions>(globalOptions => configure(globalOptions.Default!)); // name could be null only if AddHttpClientDefaults was called; that means Default is already initialized
+            }
+            else
+            {
+                services.Configure<HttpClientFactoryOptions>(name, configure);
+            }
         }
 
         /// <summary>

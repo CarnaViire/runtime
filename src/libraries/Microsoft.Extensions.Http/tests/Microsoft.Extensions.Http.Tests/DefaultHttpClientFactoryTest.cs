@@ -24,6 +24,7 @@ namespace Microsoft.Extensions.Http
             Services = new ServiceCollection().AddHttpClient().BuildServiceProvider();
             ScopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
             Options = Services.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>();
+            GlobalOptions = Services.GetRequiredService<IOptionsMonitor<HttpClientFactoryGlobalOptions>>();
         }
 
         public IServiceProvider Services { get; }
@@ -33,6 +34,7 @@ namespace Microsoft.Extensions.Http
         public ILoggerFactory LoggerFactory { get; } = NullLoggerFactory.Instance;
 
         public IOptionsMonitor<HttpClientFactoryOptions> Options { get; }
+        internal IOptionsMonitor<HttpClientFactoryGlobalOptions> GlobalOptions { get; }
 
         public IEnumerable<IHttpMessageHandlerBuilderFilter> EmptyFilters = Array.Empty<IHttpMessageHandlerBuilderFilter>();
 
@@ -46,7 +48,7 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -69,7 +71,7 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act 1
             var client1 = factory.CreateClient();
@@ -98,7 +100,7 @@ namespace Microsoft.Extensions.Http
                 b.PrimaryHandler = mockHandler.Object;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act
             using (factory.CreateClient())
@@ -124,7 +126,7 @@ namespace Microsoft.Extensions.Http
                 b.PrimaryHandler = mockHandler.Object;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act
             using (factory.CreateHandler())
@@ -144,7 +146,7 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act
             var client = factory.CreateClient();
@@ -163,7 +165,7 @@ namespace Microsoft.Extensions.Http
                 count++;
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters);
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters);
 
             // Act
             var client = factory.CreateClient("github");
@@ -227,7 +229,7 @@ namespace Microsoft.Extensions.Http
                     b.AdditionalHandlers.Add((DelegatingHandler)expected[4]);
                 });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, new[]
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, new[]
             {
                 filter1.Object,
                 filter2.Object,
@@ -256,7 +258,7 @@ namespace Microsoft.Extensions.Http
         public async Task Factory_CreateClient_WithExpiry_CanExpire()
         {
             // Arrange
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
@@ -299,7 +301,7 @@ namespace Microsoft.Extensions.Http
         public async Task Factory_CreateClient_WithExpiry_HandlerCanBeReusedBeforeExpiry()
         {
             // Arrange
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
@@ -354,7 +356,7 @@ namespace Microsoft.Extensions.Http
                 b.AdditionalHandlers.Add(disposeHandler);
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
@@ -424,7 +426,7 @@ namespace Microsoft.Extensions.Http
                 b.AdditionalHandlers.Add(disposeHandler);
             });
 
-            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, EmptyFilters)
+            var factory = new TestHttpClientFactory(Services, ScopeFactory, LoggerFactory, Options, GlobalOptions, EmptyFilters)
             {
                 EnableExpiryTimer = true,
                 EnableCleanupTimer = true,
@@ -517,8 +519,9 @@ namespace Microsoft.Extensions.Http
                 IServiceScopeFactory scopeFactory,
                 ILoggerFactory loggerFactory,
                 IOptionsMonitor<HttpClientFactoryOptions> optionsMonitor,
+                IOptionsMonitor<HttpClientFactoryGlobalOptions> globalOptionsMonitor,
                 IEnumerable<IHttpMessageHandlerBuilderFilter> filters)
-                : base(services, scopeFactory, loggerFactory, optionsMonitor, filters)
+                : base(services, scopeFactory, loggerFactory, optionsMonitor, globalOptionsMonitor, filters)
             {
                 ActiveEntryState = new Dictionary<ActiveHandlerTrackingEntry, (TaskCompletionSource<ActiveHandlerTrackingEntry>, Task)>();
                 CleanupTimerStarted = new ManualResetEventSlim(initialState: false);
