@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Threading;
@@ -14,6 +15,8 @@ namespace Microsoft.Extensions.Http
     internal sealed class DefaultHttpMessageHandlerBuilder : HttpMessageHandlerBuilder
     {
         private HttpMessageHandler? _primaryHandler;
+        private List<DelegatingHandler> _additionalHandlers = new();
+        private DelegatingHandlerPipeline? _pipeline;
         private string? _name;
 
         public DefaultHttpMessageHandlerBuilder(IServiceProvider services)
@@ -38,19 +41,28 @@ namespace Microsoft.Extensions.Http
             set => _primaryHandler = value;
         }
 
-        public override IList<DelegatingHandler> AdditionalHandlers { get; } = new List<DelegatingHandler>();
+        public bool PrimaryHandlerIsSet => _primaryHandler != null;
+
+        public override IList<DelegatingHandler> AdditionalHandlers => _additionalHandlers;
 
         public override IServiceProvider Services { get; }
 
         public override HttpMessageHandler Build()
         {
-            if (PrimaryHandler == null)
+            if (_additionalHandlers.Count == 0)
             {
-                string message = SR.Format(SR.HttpMessageHandlerBuilder_PrimaryHandlerIsNull, nameof(PrimaryHandler));
-                throw new InvalidOperationException(message);
+                return PrimaryHandler;
             }
 
-            return CreateHandlerPipeline(PrimaryHandler, AdditionalHandlers);
+            DelegatingHandlerPipeline pipeline = BuildAdditionalHandlers();
+            return pipeline.CompleteWith(PrimaryHandler);
+        }
+
+        internal DelegatingHandlerPipeline BuildAdditionalHandlers()
+        {
+            Debug.Assert(_additionalHandlers.Count > 0);
+            _pipeline ??= LinkDelegatingHandlers(_additionalHandlers);
+            return _pipeline.Value;
         }
 
 #pragma warning disable CA1822, CA1859 // Mark members as static, Use concrete types when possible for improved performance

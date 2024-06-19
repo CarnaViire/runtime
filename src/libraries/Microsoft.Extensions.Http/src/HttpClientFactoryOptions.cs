@@ -103,5 +103,8 @@ namespace Microsoft.Extensions.Http
 
         internal bool SuppressDefaultLogging { get; set; }
         internal List<Action<HttpMessageHandlerBuilder>> LoggingBuilderActions { get; } = new List<Action<HttpMessageHandlerBuilder>>();
+
+        internal bool IsKeyedService { get; set; }
+        internal bool PropagateContextScope { get; set; }
     }
 }

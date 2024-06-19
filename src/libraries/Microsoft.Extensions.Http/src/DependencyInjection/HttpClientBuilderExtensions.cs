@@ -369,12 +369,7 @@ namespace Microsoft.Extensions.DependencyInjection
             this IHttpClientBuilder builder, bool validateSingleType)
             where TClient : class
         {
-            if (builder.Name is null)
-            {
-                throw new InvalidOperationException($"{nameof(HttpClientBuilderExtensions.AddTypedClient)} isn't supported with {nameof(HttpClientFactoryServiceCollectionExtensions.ConfigureHttpClientDefaults)}.");
-            }
-
-            ReserveClient(builder, typeof(TClient), builder.Name, validateSingleType);
+            ReserveClient(builder, typeof(TClient), validateSingleType);
 
             builder.Services.AddTransient(s => AddTransientHelper<TClient>(s, builder));
 
@@ -438,7 +433,7 @@ namespace Microsoft.Extensions.DependencyInjection
             where TClient : class
             where TImplementation : class, TClient
         {
-            ReserveClient(builder, typeof(TClient), builder.Name, validateSingleType);
+            ReserveClient(builder, typeof(TClient), validateSingleType);
 
             builder.Services.AddTransient(s => AddTransientHelper<TClient, TImplementation>(s, builder));
 
@@ -489,7 +484,7 @@ namespace Microsoft.Extensions.DependencyInjection
         internal static IHttpClientBuilder AddTypedClientCore<TClient>(this IHttpClientBuilder builder, Func<HttpClient, TClient> factory, bool validateSingleType)
             where TClient : class
         {
-            ReserveClient(builder, typeof(TClient), builder.Name, validateSingleType);
+            ReserveClient(builder, typeof(TClient), validateSingleType);
 
             builder.Services.AddTransient<TClient>(s =>
             {
@@ -538,7 +533,7 @@ namespace Microsoft.Extensions.DependencyInjection
             ThrowHelper.ThrowIfNull(builder);
             ThrowHelper.ThrowIfNull(factory);
 
-            ReserveClient(builder, typeof(TClient), builder.Name, validateSingleType);
+            ReserveClient(builder, typeof(TClient), validateSingleType);
 
             builder.Services.AddTransient<TClient>(s =>
             {
@@ -650,17 +645,66 @@ namespace Microsoft.Extensions.DependencyInjection
             return builder;
         }
 
-        // See comments on HttpClientMappingRegistry.
-        private static void ReserveClient(IHttpClientBuilder builder, Type type, string name, bool validateSingleType)
+        public static IHttpClientBuilder AddKeyedServices(this IHttpClientBuilder builder)
         {
+            ThrowHelper.ThrowIfNull(builder);
+
+            object key = builder.Name ?? KeyedService.AnyKey;
+            builder.Services.AddKeyedTransient<HttpClient>(key, KeyedClientFactory);
+            builder.Services.AddKeyedScoped<HttpMessageHandler>(key, KeyedHandlerFactory);
+            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            {
+                options.IsKeyedService = true;
+            });
+
+            return builder;
+        }
+
+        public static IHttpClientBuilder PropagateContextScope(this IHttpClientBuilder builder, bool propagateContextScope = true)
+        {
+            ThrowHelper.ThrowIfNull(builder);
+
+            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            {
+                options.SuppressHandlerScope |= propagateContextScope;
+                options.PropagateContextScope = propagateContextScope;
+            });
+
+            return builder;
+        }
+
+        private static HttpClient KeyedClientFactory(IServiceProvider services, object? key)
+        {
+            ThrowHelper.ThrowIfNull(key);
+            return services.GetRequiredService<IHttpClientFactory>().CreateClient((string)key);
+        }
+
+        private static HttpMessageHandler KeyedHandlerFactory(IServiceProvider services, object? key)
+        {
+            ThrowHelper.ThrowIfNull(key);
+            return services.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler((string)key);
+        }
+
+        // See comments on HttpClientMappingRegistry.
+        private static void ReserveClient(IHttpClientBuilder builder, Type type, bool validateSingleType)
+        {
+            string name = builder.Name;
+            if (builder.Name is null)
+            {
+                throw new InvalidOperationException($"{nameof(HttpClientBuilderExtensions.AddTypedClient)} isn't supported with {nameof(HttpClientFactoryServiceCollectionExtensions.ConfigureHttpClientDefaults)}.");
+            }
+
+            // Allow using the same name with multiple types in some cases (see callers).
+            if (!validateSingleType)
+            {
+                return;
+            }
+
             var registry = (HttpClientMappingRegistry?)builder.Services.Single(sd => sd.ServiceType == typeof(HttpClientMappingRegistry)).ImplementationInstance;
             Debug.Assert(registry != null);
 
             // Check for same name registered to two types. This won't work because we rely on named options for the configuration.
             if (registry.NamedClientRegistrations.TryGetValue(name, out Type? otherType) &&
-
-                // Allow using the same name with multiple types in some cases (see callers).
-                validateSingleType &&
 
                 // Allow registering the same name twice to the same type.
                 type != otherType)
@@ -672,10 +716,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 throw new InvalidOperationException(message);
             }
 
-            if (validateSingleType)
-            {
-                registry.NamedClientRegistrations[name] = type;
-            }
+            registry.NamedClientRegistrations[name] = type;
         }
     }
 }

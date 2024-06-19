@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net.Http;
@@ -83,39 +84,61 @@ namespace Microsoft.Extensions.Http
             ThrowHelper.ThrowIfNull(primaryHandler);
             ThrowHelper.ThrowIfNull(additionalHandlers);
 
-            // This is similar to https://github.com/aspnet/AspNetWebStack/blob/master/src/System.Net.Http.Formatting/HttpClientFactory.cs#L58
-            // but we don't want to take that package as a dependency.
-
-            IReadOnlyList<DelegatingHandler> additionalHandlersList = additionalHandlers as IReadOnlyList<DelegatingHandler> ?? additionalHandlers.ToArray();
-
-            HttpMessageHandler next = primaryHandler;
-            for (int i = additionalHandlersList.Count - 1; i >= 0; i--)
+            IReadOnlyList<DelegatingHandler> handlerList = additionalHandlers as IReadOnlyList<DelegatingHandler> ?? additionalHandlers.ToArray();
+            if (handlerList.Count == 0)
             {
-                DelegatingHandler handler = additionalHandlersList[i];
-                if (handler == null)
-                {
-                    string message = SR.Format(SR.HttpMessageHandlerBuilder_AdditionalHandlerIsNull, nameof(additionalHandlers));
-                    throw new InvalidOperationException(message);
-                }
-
-                // Checking for this allows us to catch cases where someone has tried to re-use a handler. That really won't
-                // work the way you want and it can be tricky for callers to figure out.
-                if (handler.InnerHandler != null)
-                {
-                    string message = SR.Format(SR.HttpMessageHandlerBuilder_AdditionHandlerIsInvalid,
-                        nameof(DelegatingHandler.InnerHandler),
-                        nameof(DelegatingHandler),
-                        nameof(HttpMessageHandlerBuilder),
-                        Environment.NewLine,
-                        handler);
-                    throw new InvalidOperationException(message);
-                }
-
-                handler.InnerHandler = next;
-                next = handler;
+                return primaryHandler;
             }
 
-            return next;
+            DelegatingHandlerPipeline pipeline = LinkDelegatingHandlers(handlerList);
+            return pipeline.CompleteWith(primaryHandler);
+        }
+
+        internal static DelegatingHandlerPipeline LinkDelegatingHandlers(IReadOnlyList<DelegatingHandler> handlers)
+        {
+            int innerMostIdx = handlers.Count - 1;
+            DelegatingHandler inner = handlers[innerMostIdx];
+            ValidateDelegatingHandler(inner);
+
+            for (int i = innerMostIdx - 1; i >= 0; i--)
+            {
+                DelegatingHandler outer = handlers[i];
+                ValidateDelegatingHandler(outer);
+                outer.InnerHandler = inner;
+                inner = outer;
+            }
+            return new DelegatingHandlerPipeline(handlers[0], handlers[innerMostIdx]);
+        }
+
+        private static void ValidateDelegatingHandler(DelegatingHandler handler)
+        {
+            if (handler == null)
+            {
+                string message = SR.Format(SR.HttpMessageHandlerBuilder_AdditionalHandlerIsNull, nameof(AdditionalHandlers));
+                throw new InvalidOperationException(message);
+            }
+
+            // Checking for this allows us to catch cases where someone has tried to re-use a handler. That really won't
+            // work the way you want and it can be tricky for callers to figure out.
+            if (handler.InnerHandler != null)
+            {
+                string message = SR.Format(SR.HttpMessageHandlerBuilder_AdditionHandlerIsInvalid,
+                    nameof(DelegatingHandler.InnerHandler),
+                    nameof(DelegatingHandler),
+                    nameof(HttpMessageHandlerBuilder),
+                    Environment.NewLine,
+                    handler);
+                throw new InvalidOperationException(message);
+            }
+        }
+    }
+
+    internal record struct DelegatingHandlerPipeline(DelegatingHandler OuterMost, DelegatingHandler InnerMost)
+    {
+        public readonly HttpMessageHandler CompleteWith(HttpMessageHandler primaryHandler)
+        {
+            InnerMost.InnerHandler = primaryHandler;
+            return OuterMost;
         }
     }
 }

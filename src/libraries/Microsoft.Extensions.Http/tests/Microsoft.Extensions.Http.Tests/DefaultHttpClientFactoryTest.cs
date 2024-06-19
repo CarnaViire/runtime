@@ -235,7 +235,7 @@ namespace Microsoft.Extensions.Http
             });
 
             // Act
-            var handler = (HttpMessageHandler)factory.CreateHandlerEntry("github").Handler;
+            var handler = (HttpMessageHandler)factory.CreateScopedEntry("github", Options.Get("github")).Handler; // TODO: change made to compile
 
             // Assert
             //
@@ -266,7 +266,7 @@ namespace Microsoft.Extensions.Http
             var client1 = factory.CreateClient("github");
 
             // Assert - 1
-            var activeEntry1 = Assert.Single(factory._activeHandlers).Value.Value;
+            var activeEntry1 = Assert.Single(factory._activeHandlers).Value; // TODO: change made to compile
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
@@ -287,7 +287,7 @@ namespace Microsoft.Extensions.Http
             var client2 = factory.CreateClient("github");
 
             // Assert - 3
-            var activeEntry2 = Assert.Single(factory._activeHandlers).Value.Value;
+            var activeEntry2 = Assert.Single(factory._activeHandlers).Value; // TODO: change made to compile
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
@@ -309,7 +309,7 @@ namespace Microsoft.Extensions.Http
             var client1 = factory.CreateClient("github");
 
             // Assert - 1
-            var activeEntry1 = Assert.Single(factory._activeHandlers).Value.Value;
+            var activeEntry1 = Assert.Single(factory._activeHandlers).Value; // TODO: change made to compile
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
@@ -318,7 +318,7 @@ namespace Microsoft.Extensions.Http
             var client2 = factory.CreateClient("github");
 
             // Assert - 2
-            Assert.Same(activeEntry1, Assert.Single(factory._activeHandlers).Value.Value);
+            Assert.Same(activeEntry1, Assert.Single(factory._activeHandlers).Value); // TODO: change made to compile
 
             // Act - 3 - Now simulate the timer triggering to complete the expiry.
             var (completionSource, expiryTask) = factory.ActiveEntryState[activeEntry1];
@@ -336,7 +336,7 @@ namespace Microsoft.Extensions.Http
             var client3 = factory.CreateClient("github");
 
             // Assert - 4
-            var activeEntry2 = Assert.Single(factory._activeHandlers).Value.Value;
+            var activeEntry2 = Assert.Single(factory._activeHandlers).Value; // TODO: change made to compile
             Assert.Equal("github", activeEntry1.Name);
             Assert.Equal(TimeSpan.FromMinutes(2), activeEntry1.Lifetime);
             Assert.NotNull(activeEntry1.Handler);
