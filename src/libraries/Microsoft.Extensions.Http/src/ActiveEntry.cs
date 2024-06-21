@@ -11,17 +11,17 @@ namespace Microsoft.Extensions.Http
 {
     // Thread-safety: We treat this class as immutable except for the timer. Creating a new object
     // for the 'expiry' pool simplifies the threading requirements significantly.
-    internal sealed class ActiveHandlerTrackingEntry
+    internal sealed class ActiveEntry
     {
-        private static readonly TimerCallback _timerCallback = (s) => ((ActiveHandlerTrackingEntry)s!).Timer_Tick();
+        private static readonly TimerCallback _timerCallback = (s) => ((ActiveEntry)s!).Timer_Tick();
         private readonly object _lock;
         private bool _timerInitialized;
         private Timer? _timer;
         private TimerCallback? _callback;
 
-        public ActiveHandlerTrackingEntry(
+        public ActiveEntry(
             string name,
-            LifetimeTrackingHttpMessageHandler handler,
+            SharedHttpHandler handler,
             IServiceScope? scope,
             TimeSpan lifetime)
         {
@@ -33,7 +33,7 @@ namespace Microsoft.Extensions.Http
             _lock = new object();
         }
 
-        public LifetimeTrackingHttpMessageHandler Handler { get; }
+        public SharedHttpHandler Handler { get; }
 
         public TimeSpan Lifetime { get; }
 

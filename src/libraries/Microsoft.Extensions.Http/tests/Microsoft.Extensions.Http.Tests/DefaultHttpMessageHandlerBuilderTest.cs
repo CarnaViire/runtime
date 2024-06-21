@@ -115,7 +115,7 @@ namespace Microsoft.Extensions.Http
 
             // Act & Assert
             var exception = Assert.Throws<InvalidOperationException>(() => builder.Build());
-            Assert.Equal("The 'additionalHandlers' must not contain a null entry.", exception.Message);
+            Assert.Equal("The 'AdditionalHandlers' must not contain a null entry.", exception.Message);
         }
 
         // Moq heavily utilizes RefEmit, which does not work on most aot workloads

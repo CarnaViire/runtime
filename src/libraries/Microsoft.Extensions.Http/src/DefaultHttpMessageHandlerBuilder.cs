@@ -16,7 +16,6 @@ namespace Microsoft.Extensions.Http
     {
         private HttpMessageHandler? _primaryHandler;
         private List<DelegatingHandler> _additionalHandlers = new();
-        private DelegatingHandlerPipeline? _pipeline;
         private string? _name;
 
         public DefaultHttpMessageHandlerBuilder(IServiceProvider services)
@@ -54,16 +53,10 @@ namespace Microsoft.Extensions.Http
                 return PrimaryHandler;
             }
 
-            DelegatingHandlerPipeline pipeline = BuildAdditionalHandlers();
-            return pipeline.CompleteWith(PrimaryHandler);
+            return LinkAdditionalHandlers().CompleteWith(PrimaryHandler);
         }
 
-        internal DelegatingHandlerPipeline BuildAdditionalHandlers()
-        {
-            Debug.Assert(_additionalHandlers.Count > 0);
-            _pipeline ??= LinkDelegatingHandlers(_additionalHandlers);
-            return _pipeline.Value;
-        }
+        internal AdditionalHandlersPipeline LinkAdditionalHandlers() => LinkAdditionalHandlers(_additionalHandlers);
 
 #pragma warning disable CA1822, CA1859 // Mark members as static, Use concrete types when possible for improved performance
         private HttpMessageHandler CreatePrimaryHandler()

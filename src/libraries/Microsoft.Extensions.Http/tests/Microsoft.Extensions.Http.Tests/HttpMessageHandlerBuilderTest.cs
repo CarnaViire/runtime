@@ -27,7 +27,7 @@ namespace Microsoft.Extensions.Http.Test
             {
                 HttpMessageHandlerBuilder.CreateHandlerPipeline(primaryHandler, additionalHandlers);
             });
-            Assert.Equal("The 'additionalHandlers' must not contain a null entry.", exception.Message);
+            Assert.Equal("The 'AdditionalHandlers' must not contain a null entry.", exception.Message);
         }
 
         // Moq heavily utilizes RefEmit, which does not work on most aot workloads

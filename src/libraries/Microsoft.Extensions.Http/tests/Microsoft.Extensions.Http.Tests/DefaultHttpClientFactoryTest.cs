@@ -235,12 +235,12 @@ namespace Microsoft.Extensions.Http
             });
 
             // Act
-            var handler = (HttpMessageHandler)factory.CreateScopedEntry("github", Options.Get("github")).Handler; // TODO: change made to compile
+            var handler = (HttpMessageHandler)factory.CreateDetachedHandlerEntry("github", Options.Get("github")).Handler; // TODO: change made to compile
 
             // Assert
             //
             // The outer-most handler is always a lifetime tracking handler.
-            Assert.IsType<LifetimeTrackingHttpMessageHandler>(handler);
+            Assert.IsType<SharedHttpHandler>(handler);
             handler = Assert.IsAssignableFrom<DelegatingHandler>(handler).InnerHandler;
 
             for (var i = 0; i < expected.Length - 1; i++)
@@ -392,7 +392,7 @@ namespace Microsoft.Extensions.Http
         // Separate to avoid the HttpClient getting its lifetime extended by
         // the state machine of the test.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private async Task<ExpiredHandlerTrackingEntry> SimulateClientUse_Factory_CleanupCycle_DisposesEligibleHandler(TestHttpClientFactory factory)
+        private async Task<ExpiredEntry> SimulateClientUse_Factory_CleanupCycle_DisposesEligibleHandler(TestHttpClientFactory factory)
         {
             // Create a handler and move it to the expired state
             var client1 = factory.CreateClient("github");
@@ -462,7 +462,7 @@ namespace Microsoft.Extensions.Http
         // Separate to avoid the HttpClient getting its lifetime extended by
         // the state machine of the test.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private async Task<ExpiredHandlerTrackingEntry> SimulateClientUse_Factory_CleanupCycle_DisposesLiveHandler(
+        private async Task<ExpiredEntry> SimulateClientUse_Factory_CleanupCycle_DisposesLiveHandler(
             TestHttpClientFactory factory,
             DisposeTrackingHandler disposeHandler)
         {
@@ -542,7 +542,7 @@ namespace Microsoft.Extensions.Http
                 IEnumerable<IHttpMessageHandlerBuilderFilter> filters)
                 : base(services, scopeFactory, optionsMonitor, filters)
             {
-                ActiveEntryState = new Dictionary<ActiveHandlerTrackingEntry, (TaskCompletionSource<ActiveHandlerTrackingEntry>, Task)>();
+                ActiveEntryState = new Dictionary<ActiveEntry, (TaskCompletionSource<ActiveEntry>, Task)>();
                 CleanupTimerStarted = new ManualResetEventSlim(initialState: false);
             }
 
@@ -552,9 +552,9 @@ namespace Microsoft.Extensions.Http
 
             public ManualResetEventSlim CleanupTimerStarted { get; }
 
-            public Dictionary<ActiveHandlerTrackingEntry, (TaskCompletionSource<ActiveHandlerTrackingEntry>, Task)> ActiveEntryState { get; }
+            public Dictionary<ActiveEntry, (TaskCompletionSource<ActiveEntry>, Task)> ActiveEntryState { get; }
 
-            internal override void StartHandlerEntryTimer(ActiveHandlerTrackingEntry entry)
+            internal override void StartHandlerEntryTimer(ActiveEntry entry)
             {
                 if (EnableExpiryTimer)
                 {
@@ -567,7 +567,7 @@ namespace Microsoft.Extensions.Http
                         }
 
                         // Rather than using the actual timer on the actual entry, let's fake it with async.
-                        var completionSource = new TaskCompletionSource<ActiveHandlerTrackingEntry>();
+                        var completionSource = new TaskCompletionSource<ActiveEntry>();
                         var expiryTask = completionSource.Task.ContinueWith(t =>
                         {
                             var e = t.Result;

@@ -90,27 +90,28 @@ namespace Microsoft.Extensions.Http
                 return primaryHandler;
             }
 
-            DelegatingHandlerPipeline pipeline = LinkDelegatingHandlers(handlerList);
-            return pipeline.CompleteWith(primaryHandler);
+            return LinkAdditionalHandlers(handlerList).CompleteWith(primaryHandler);
         }
 
-        internal static DelegatingHandlerPipeline LinkDelegatingHandlers(IReadOnlyList<DelegatingHandler> handlers)
+        internal static AdditionalHandlersPipeline LinkAdditionalHandlers(IReadOnlyList<DelegatingHandler> handlers)
         {
+            Debug.Assert(handlers.Count > 0);
+
             int innerMostIdx = handlers.Count - 1;
             DelegatingHandler inner = handlers[innerMostIdx];
-            ValidateDelegatingHandler(inner);
+            ValidateAdditionalHandler(inner);
 
             for (int i = innerMostIdx - 1; i >= 0; i--)
             {
                 DelegatingHandler outer = handlers[i];
-                ValidateDelegatingHandler(outer);
+                ValidateAdditionalHandler(outer);
                 outer.InnerHandler = inner;
                 inner = outer;
             }
-            return new DelegatingHandlerPipeline(handlers[0], handlers[innerMostIdx]);
+            return new AdditionalHandlersPipeline(handlers[0], handlers[innerMostIdx]);
         }
 
-        private static void ValidateDelegatingHandler(DelegatingHandler handler)
+        private static void ValidateAdditionalHandler(DelegatingHandler handler)
         {
             if (handler == null)
             {
@@ -133,12 +134,12 @@ namespace Microsoft.Extensions.Http
         }
     }
 
-    internal record struct DelegatingHandlerPipeline(DelegatingHandler OuterMost, DelegatingHandler InnerMost)
+    internal record struct AdditionalHandlersPipeline(DelegatingHandler OuterMostHandler, DelegatingHandler InnerMostHandler)
     {
         public readonly HttpMessageHandler CompleteWith(HttpMessageHandler primaryHandler)
         {
-            InnerMost.InnerHandler = primaryHandler;
-            return OuterMost;
+            InnerMostHandler.InnerHandler = primaryHandler;
+            return OuterMostHandler;
         }
     }
 }

@@ -48,7 +48,7 @@ namespace Microsoft.Extensions.Http
         //
         // internal for tests
         internal readonly ConcurrentDictionary<string, object> _handlerLocks; // TODO: solve retention problem
-        internal readonly ConcurrentDictionary<string, ActiveHandlerTrackingEntry> _activeHandlers; // active handlers
+        internal readonly ConcurrentDictionary<string, ActiveEntry> _activeHandlers;
 
         // Collection of 'expired' but not yet disposed handlers.
         //
@@ -56,7 +56,7 @@ namespace Microsoft.Extensions.Http
         // are eligible for garbage collection.
         //
         // internal for tests
-        internal readonly ConcurrentQueue<ExpiredHandlerTrackingEntry> _expiredHandlers;
+        internal readonly ConcurrentQueue<ExpiredEntry> _expiredHandlers;
         private readonly TimerCallback _expiryCallback;
 
         public DefaultHttpClientFactory(
@@ -77,9 +77,9 @@ namespace Microsoft.Extensions.Http
 
             // case-sensitive because named options is.
             _handlerLocks = new ConcurrentDictionary<string, object>(StringComparer.Ordinal);
-            _activeHandlers = new ConcurrentDictionary<string, ActiveHandlerTrackingEntry>(StringComparer.Ordinal);
+            _activeHandlers = new ConcurrentDictionary<string, ActiveEntry>(StringComparer.Ordinal);
 
-            _expiredHandlers = new ConcurrentQueue<ExpiredHandlerTrackingEntry>();
+            _expiredHandlers = new ConcurrentQueue<ExpiredEntry>();
             _expiryCallback = ExpiryTimer_Tick;
 
             _cleanupTimerLock = new object();
@@ -96,11 +96,11 @@ namespace Microsoft.Extensions.Http
 
         public HttpClient CreateClient(string name) => CreateClient(name, _services);
 
-        public HttpClient CreateClient(string name, IServiceProvider services)
+        public HttpClient CreateClient(string name, IServiceProvider contextServices)
         {
             ThrowHelper.ThrowIfNull(name);
 
-            HttpMessageHandler handler = CreateHandler(name, services);
+            HttpMessageHandler handler = CreateHandler(name, contextServices);
             var client = new HttpClient(handler, disposeHandler: false);
 
             HttpClientFactoryOptions options = _optionsMonitor.Get(name);
@@ -114,74 +114,60 @@ namespace Microsoft.Extensions.Http
 
         public HttpMessageHandler CreateHandler(string name) => CreateHandler(name, _services);
 
-        public HttpMessageHandler CreateHandler(string name, IServiceProvider services)
+        public HttpMessageHandler CreateHandler(string name, IServiceProvider contextServices)
         {
             ThrowHelper.ThrowIfNull(name);
 
             HttpClientFactoryOptions options = _optionsMonitor.Get(name);
-            if (!options.SuppressHandlerScope && options.PropagateContextScope)
-            {
-                throw new InvalidOperationException($"{nameof(HttpClientFactoryOptions.PropagateContextScope)} is not supported when " +
-                    $"{nameof(HttpClientFactoryOptions.SuppressHandlerScope)} is false.");
-            }
+            Debug.Assert(options.SuppressHandlerScope || !options.PropagateContextScope);
 
-            HttpMessageHandler completeHandler;
+            ActiveHandler activeHandler = GetOrCreateActiveHandler(name, options, contextServices);
+            StartHandlerEntryTimer(activeHandler.Entry);
+            return activeHandler.Handler;
+        }
 
-            if (!_activeHandlers.TryGetValue(name, out ActiveHandlerTrackingEntry? entry))
+        internal ActiveHandler GetOrCreateActiveHandler(string name, HttpClientFactoryOptions options, IServiceProvider contextServices)
+        {
+            if (!_activeHandlers.TryGetValue(name, out ActiveEntry? entry))
             {
-                object namedSyncObj = _handlerLocks.GetOrAdd(name, _ => new object());
+                object namedSyncObj = _handlerLocks.GetOrAdd(name, _ => new object()); // TODO: solve retention problem
                 lock (namedSyncObj)
                 {
-                    if (!options.SuppressHandlerScope)
+                    if (!_activeHandlers.TryGetValue(name, out entry))
                     {
-                        entry = _activeHandlers.GetOrAdd(name, n => CreateScopedEntry(n, options));
-                        completeHandler = entry.Handler;
-                    }
-                    else if (!options.PropagateContextScope)
-                    {
-                        entry = _activeHandlers.GetOrAdd(name, n => CreateRootEntry(n, options));
-                        completeHandler = entry.Handler;
-                    }
-                    else
-                    {
-                        if (_activeHandlers.TryGetValue(name, out entry))
-                        {
-                            completeHandler = BuildChainAndSubstitutePrimaryHandler(name, options, services, entry.Handler);
-                        }
-                        else
-                        {
-                            (completeHandler, LifetimeTrackingHttpMessageHandler primaryHandler) = BuildChainAndExtractPrimaryHandler(name, options, services);
-                            entry = new ActiveHandlerTrackingEntry(name, primaryHandler, scope: null, options.HandlerLifetime);
-                            bool added = _activeHandlers.TryAdd(name, entry);
-                            Debug.Assert(added);
-                        }
+                        ActiveHandler activeHandler = options.PropagateContextScope
+                            ? BuildNewContextAwareHandler(name, options, contextServices)
+                            : new ActiveHandler(CreateDetachedHandlerEntry(name, options));
+
+                        bool added = _activeHandlers.TryAdd(name, activeHandler.Entry);
+                        Debug.Assert(added);
+
+                        return activeHandler;
                     }
                 }
             }
-            else
-            {
-                completeHandler = BuildChainAndSubstitutePrimaryHandler(name, options, services, entry.Handler);
-            }
 
-            StartHandlerEntryTimer(entry);
-
-            return completeHandler is LifetimeTrackingHttpMessageHandler
-                ? completeHandler
-                : new LifetimeTrackingHttpMessageHandler(completeHandler);
+            return options.PropagateContextScope
+                ? RebuildContextAwareHandler(name, options, contextServices, entry)
+                : new ActiveHandler(entry);
         }
 
-
-        internal ActiveHandlerTrackingEntry CreateScopedEntry(string name, HttpClientFactoryOptions options)
+        internal ActiveEntry CreateDetachedHandlerEntry(string name, HttpClientFactoryOptions options)
         {
-            IServiceScope scope = _scopeFactory.CreateScope();
-            IServiceProvider services = scope.ServiceProvider;
+            IServiceProvider services = _services;
+            IServiceScope? scope = null;
+            if (!options.SuppressHandlerScope)
+            {
+                scope = _scopeFactory.CreateScope();
+                services = scope.ServiceProvider;
+            }
 
             try
             {
-                HttpMessageHandlerBuilder builder = CreateAndConfigureHandlerBuilder(name, options, services);
+                HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
 
                 // Wrap the handler so we can ensure the inner handler outlives the outer handler.
-                var handler = new LifetimeTrackingHttpMessageHandler(builder.Build());
+                var handler = new SharedHttpHandler(builder.Build());
 
                 // Note that we can't start the timer here. That would introduce a very very subtle race condition
                 // with very short expiry times. We need to wait until we've actually handed out the handler once
@@ -190,111 +176,97 @@ namespace Microsoft.Extensions.Http
                 // Otherwise it would be possible that we start the timer here, immediately expire it (very short
                 // timer) and then dispose it without ever creating a client. That would be bad. It's unlikely
                 // this would happen, but we want to be sure.
-                return new ActiveHandlerTrackingEntry(name, handler, scope, options.HandlerLifetime);
+                return new ActiveEntry(name, handler, scope, options.HandlerLifetime);
             }
             catch
             {
                 // If something fails while creating the handler, dispose the services.
-                scope.Dispose();
+                scope?.Dispose();
                 throw;
             }
         }
 
-        private ActiveHandlerTrackingEntry CreateRootEntry(string name, HttpClientFactoryOptions options)
+        private ActiveHandler BuildNewContextAwareHandler(string name, HttpClientFactoryOptions options, IServiceProvider services)
         {
-            HttpMessageHandlerBuilder builder = CreateAndConfigureHandlerBuilder(name, options, _services);
-            LifetimeTrackingHttpMessageHandler handler = new(builder.Build());
-            return new ActiveHandlerTrackingEntry(name, handler, scope: null, options.HandlerLifetime);
+            HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
+            SharedHttpHandler primaryHandler = new SharedHttpHandler(builder.PrimaryHandler);
+
+            return new ActiveHandler(
+                new ActiveEntry(name, primaryHandler, scope: null, options.HandlerLifetime),
+                BuildAndCompletePipeline(builder, primaryHandler));
         }
 
-        private (HttpMessageHandler, LifetimeTrackingHttpMessageHandler) BuildChainAndExtractPrimaryHandler(string name, HttpClientFactoryOptions options, IServiceProvider services)
+        private ActiveHandler RebuildContextAwareHandler(string name, HttpClientFactoryOptions options, IServiceProvider services, ActiveEntry cachedPrimaryEntry)
         {
-            HttpMessageHandlerBuilder builder = CreateAndConfigureHandlerBuilder(name, options, services);
+            HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
 
-            DelegatingHandlerPipeline? additionalHandlersPipeline;
-
-            if (builder is DefaultHttpMessageHandlerBuilder defaultBuilder)
+            if (builder is not DefaultHttpMessageHandlerBuilder b || b.PrimaryHandlerIsSet)
             {
-                additionalHandlersPipeline = BuildAdditionalHandlers(defaultBuilder);
-            }
-            else
-            {
-                // we resolved some custom builder -- we will have to manually traverse the chain to be able to extract the primary handler
-                additionalHandlersPipeline = BuildAndTraverseAdditionalHandlers(builder);
+                if (builder.PrimaryHandler == cachedPrimaryEntry.Handler.InnerHandler)
+                {
+                    throw new InvalidOperationException("Primary handler instance should not be reused.");
+                }
+                builder.PrimaryHandler.Dispose();
             }
 
-            LifetimeTrackingHttpMessageHandler primaryHandler = new LifetimeTrackingHttpMessageHandler(builder.PrimaryHandler);
-
-            if (additionalHandlersPipeline is DelegatingHandlerPipeline pipeline)
-            {
-                return (pipeline.CompleteWith(primaryHandler), primaryHandler);
-            }
-
-            return (primaryHandler, primaryHandler);
+            return new ActiveHandler(cachedPrimaryEntry, BuildAndCompletePipeline(builder, cachedPrimaryEntry.Handler));
         }
 
-        private HttpMessageHandler BuildChainAndSubstitutePrimaryHandler(string name, HttpClientFactoryOptions options, IServiceProvider services, LifetimeTrackingHttpMessageHandler substitutingPrimaryHandler)
+        private static SharedHttpHandler BuildAndCompletePipeline(HttpMessageHandlerBuilder builder, SharedHttpHandler primaryHandler)
         {
-            HttpMessageHandlerBuilder builder = CreateAndConfigureHandlerBuilder(name, options, services);
-
-            bool needToDisposePrimaryHandler = true;
-            DelegatingHandlerPipeline? additionalHandlersPipeline;
-
-            if (builder is DefaultHttpMessageHandlerBuilder defaultBuilder)
+            AdditionalHandlersPipeline? pipeline;
+            if (builder is DefaultHttpMessageHandlerBuilder b)
             {
-                additionalHandlersPipeline = BuildAdditionalHandlers(defaultBuilder);
-                needToDisposePrimaryHandler = defaultBuilder.PrimaryHandlerIsSet;
+                pipeline = b.AdditionalHandlers.Count > 0 ? b.LinkAdditionalHandlers() : null;
             }
             else
             {
                 // we resolved some custom builder -- we will have to manually traverse the chain to be able to substitute the primary handler
-                additionalHandlersPipeline = BuildAndTraverseAdditionalHandlers(builder);
+                pipeline = BuildAndExtractPipeline(builder);
             }
 
-            if (needToDisposePrimaryHandler && builder.PrimaryHandler != substitutingPrimaryHandler && builder.PrimaryHandler != substitutingPrimaryHandler.InnerHandler)
+            if (pipeline is null)
             {
-                builder.PrimaryHandler.Dispose();
+                return primaryHandler;
             }
-
-            if (additionalHandlersPipeline is DelegatingHandlerPipeline pipeline)
-            {
-                return pipeline.CompleteWith(substitutingPrimaryHandler);
-            }
-
-            return substitutingPrimaryHandler;
+            return new SharedHttpHandler(pipeline.Value.CompleteWith(primaryHandler));
         }
 
-
-        private static DelegatingHandlerPipeline? BuildAdditionalHandlers(DefaultHttpMessageHandlerBuilder builder)
-            => builder.AdditionalHandlers.Count == 0
-                ? null // no chain
-                : builder.BuildAdditionalHandlers();
-
-
-        private static DelegatingHandlerPipeline? BuildAndTraverseAdditionalHandlers(HttpMessageHandlerBuilder builder)
+        private static AdditionalHandlersPipeline? BuildAndExtractPipeline(HttpMessageHandlerBuilder builder)
         {
-            HttpMessageHandler outerMost = builder.Build();
+            HttpMessageHandler handler = builder.Build();
+            if (handler == builder.PrimaryHandler)
+            {
+                return null;
+            }
 
-            DelegatingHandler? outer = null;
-            HttpMessageHandler? inner = outerMost;
+            if (handler is not DelegatingHandler outerMost)
+            {
+                throw new InvalidOperationException($"Property {nameof(builder.PrimaryHandler)} does not match the effective primary handler in the pipeline");
+            }
+
+            DelegatingHandler outer = outerMost;
+            HttpMessageHandler? inner = outer.InnerHandler;
             while (inner is not null && inner != builder.PrimaryHandler && inner is DelegatingHandler innerDelegating)
             {
                 outer = innerDelegating;
-                inner = innerDelegating.InnerHandler;
+                inner = outer.InnerHandler;
             }
 
-            HttpMessageHandler effectivePrimary = inner!;
-            if (builder.PrimaryHandler != effectivePrimary)
+            if (inner is null)
             {
-                builder.PrimaryHandler = effectivePrimary;
+                throw new InvalidOperationException($"No primary handler in the pipeline");
             }
 
-            return outerMost == effectivePrimary
-                ? null // no chain
-                : new DelegatingHandlerPipeline((DelegatingHandler)outerMost, outer!);
+            if (builder.PrimaryHandler != inner)
+            {
+                throw new InvalidOperationException($"Property {nameof(builder.PrimaryHandler)} does not match the effective primary handler in the pipeline");
+            }
+
+            return new AdditionalHandlersPipeline(outerMost, outer);
         }
 
-        private HttpMessageHandlerBuilder CreateAndConfigureHandlerBuilder(string name, HttpClientFactoryOptions options, IServiceProvider services)
+        private HttpMessageHandlerBuilder InitializeBuilder(string name, HttpClientFactoryOptions options, IServiceProvider services)
         {
             HttpMessageHandlerBuilder builder = services.GetRequiredService<HttpMessageHandlerBuilder>();
             builder.Name = name;
@@ -318,7 +290,7 @@ namespace Microsoft.Extensions.Http
                     options.HttpMessageHandlerBuilderActions[i](b);
                 }
 
-                // Logging is added separately in the end. But for now it should be still possible to override it via filters...
+                // Logging is added separately in the end. It is still possible to override it via filters.
                 foreach (Action<HttpMessageHandlerBuilder> action in options.LoggingBuilderActions)
                 {
                     action(b);
@@ -329,11 +301,11 @@ namespace Microsoft.Extensions.Http
         // Internal for tests
         internal void ExpiryTimer_Tick(object? state)
         {
-            var active = (ActiveHandlerTrackingEntry)state!;
+            var active = (ActiveEntry)state!;
 
             // The timer callback should be the only one removing from the active collection. If we can't find
             // our entry in the collection, then this is a bug.
-            bool removed = _activeHandlers.TryRemove(active.Name, out ActiveHandlerTrackingEntry? found);
+            bool removed = _activeHandlers.TryRemove(active.Name, out ActiveEntry? found);
             Debug.Assert(removed, "Entry not found. We should always be able to remove the entry");
             Debug.Assert(ReferenceEquals(active, found!), "Different entry found. The entry should not have been replaced");
 
@@ -343,7 +315,7 @@ namespace Microsoft.Extensions.Http
             //
             // We use a different state object to track expired handlers. This allows any other thread that acquired
             // the 'active' entry to use it without safety problems.
-            var expired = new ExpiredHandlerTrackingEntry(active);
+            var expired = new ExpiredEntry(active);
             _expiredHandlers.Enqueue(expired);
 
             Log.HandlerExpired(_logger, active.Name, active.Lifetime);
@@ -352,7 +324,7 @@ namespace Microsoft.Extensions.Http
         }
 
         // Internal so it can be overridden in tests
-        internal virtual void StartHandlerEntryTimer(ActiveHandlerTrackingEntry entry)
+        internal virtual void StartHandlerEntryTimer(ActiveEntry entry)
         {
             entry.StartExpiryTimer(_expiryCallback);
         }
@@ -412,7 +384,7 @@ namespace Microsoft.Extensions.Http
                 for (int i = 0; i < initialCount; i++)
                 {
                     // Since we're the only one removing from _expired, TryDequeue must always succeed.
-                    _expiredHandlers.TryDequeue(out ExpiredHandlerTrackingEntry? entry);
+                    _expiredHandlers.TryDequeue(out ExpiredEntry? entry);
                     Debug.Assert(entry != null, "Entry was null, we should always get an entry back from TryDequeue");
 
                     if (entry.CanDispose)
@@ -448,6 +420,11 @@ namespace Microsoft.Extensions.Http
             {
                 StartCleanupTimer();
             }
+        }
+
+        internal record struct ActiveHandler(ActiveEntry Entry, SharedHttpHandler? _handler = null)
+        {
+            public readonly HttpMessageHandler Handler => _handler ?? Entry.Handler;
         }
 
         private static class Log

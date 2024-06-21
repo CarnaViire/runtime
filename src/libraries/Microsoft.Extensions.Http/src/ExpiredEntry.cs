@@ -8,13 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Microsoft.Extensions.Http
 {
     // Thread-safety: This class is immutable
-    internal sealed class ExpiredHandlerTrackingEntry
+    internal sealed class ExpiredEntry
     {
         private readonly WeakReference _livenessTracker;
 
         // IMPORTANT: don't cache a reference to `other` or `other.Handler` here.
         // We need to allow it to be GC'ed.
-        public ExpiredHandlerTrackingEntry(ActiveHandlerTrackingEntry other)
+        public ExpiredEntry(ActiveEntry other)
         {
             Name = other.Name;
             Scope = other.Scope;
