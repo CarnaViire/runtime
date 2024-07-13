@@ -235,7 +235,7 @@ namespace Microsoft.Extensions.Http
             });
 
             // Act
-            var handler = (HttpMessageHandler)factory.CreateDetachedHandlerEntry("github", Options.Get("github")).Handler; // TODO: change made to compile
+            var handler = (HttpMessageHandler)factory.CreateActiveHandler("github", Options.Get("github"), Services, isContextAware: false).Handler; // TODO: change made to compile
 
             // Assert
             //

@@ -20,8 +20,6 @@ namespace Microsoft.Extensions.Http
         internal static readonly TimeSpan MinimumHandlerLifetime = TimeSpan.FromSeconds(1);
 
         private TimeSpan _handlerLifetime = TimeSpan.FromMinutes(2);
-        private bool _suppressHandlerScope;
-        private bool _propagateContextScope;
 
         /// <summary>
         /// Gets a list of operations used to configure an <see cref="HttpMessageHandlerBuilder"/>.
@@ -101,34 +99,13 @@ namespace Microsoft.Extensions.Http
         /// <see cref="HttpClientBuilderExtensions.AddHttpMessageHandler{THandler}(IHttpClientBuilder)"/>.
         /// </para>
         /// </remarks>
-        public bool SuppressHandlerScope
-        {
-            get => _suppressHandlerScope;
-            set
-            {
-                if (!value && _propagateContextScope)
-                {
-                    throw new InvalidOperationException($"{nameof(PropagateContextScope)} is not supported when {nameof(SuppressHandlerScope)} is false.");
-                }
-                _suppressHandlerScope = value;
-            }
-        }
+        public bool SuppressHandlerScope { get; set; }
 
         internal bool SuppressDefaultLogging { get; set; }
         internal List<Action<HttpMessageHandlerBuilder>> LoggingBuilderActions { get; } = new List<Action<HttpMessageHandlerBuilder>>();
 
-        internal bool IsKeyedService { get; set; }
-        internal bool PropagateContextScope
-        {
-            get => _propagateContextScope;
-            set
-            {
-                if (!_suppressHandlerScope && value)
-                {
-                    throw new InvalidOperationException($"{nameof(PropagateContextScope)} is not supported when {nameof(SuppressHandlerScope)} is false.");
-                }
-                _propagateContextScope = value;
-            }
-        }
+        internal ServiceLifetime? KeyedLifetime { get; set; }
+        internal bool IsKeyed => KeyedLifetime.HasValue;
+        internal bool PropagateContextScope => IsKeyed;
     }
 }

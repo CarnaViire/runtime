@@ -19,7 +19,7 @@ namespace Microsoft.Extensions.Http
     internal class DefaultHttpClientFactory : IHttpClientFactory, IHttpMessageHandlerFactory
     {
         private static readonly TimerCallback _cleanupCallback = (s) => ((DefaultHttpClientFactory)s!).CleanupTimer_Tick();
-        private readonly IServiceProvider _services;
+        private readonly IServiceProvider _rootServices;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IOptionsMonitor<HttpClientFactoryOptions> _optionsMonitor;
         private readonly IHttpMessageHandlerBuilderFilter[] _filters;
@@ -70,7 +70,7 @@ namespace Microsoft.Extensions.Http
             ThrowHelper.ThrowIfNull(optionsMonitor);
             ThrowHelper.ThrowIfNull(filters);
 
-            _services = services;
+            _rootServices = services;
             _scopeFactory = scopeFactory;
             _optionsMonitor = optionsMonitor;
             _filters = filters.ToArray();
@@ -90,11 +90,11 @@ namespace Microsoft.Extensions.Http
             // Logger will be created during the first ExpiryTimer_Tick execution. Lazy guarantees thread safety
             // to prevent creation of unnecessary ILogger objects in case several handlers expired at the same time.
             _logger = new Lazy<ILogger>(
-                () => _services.GetRequiredService<ILoggerFactory>().CreateLogger<DefaultHttpClientFactory>(),
+                () => _rootServices.GetRequiredService<ILoggerFactory>().CreateLogger<DefaultHttpClientFactory>(),
                 LazyThreadSafetyMode.ExecutionAndPublication);
         }
 
-        public HttpClient CreateClient(string name) => CreateClient(name, _services);
+        public HttpClient CreateClient(string name) => CreateClient(name, _rootServices);
 
         public HttpClient CreateClient(string name, IServiceProvider contextServices)
         {
@@ -112,14 +112,13 @@ namespace Microsoft.Extensions.Http
             return client;
         }
 
-        public HttpMessageHandler CreateHandler(string name) => CreateHandler(name, _services);
+        public HttpMessageHandler CreateHandler(string name) => CreateHandler(name, _rootServices);
 
         public HttpMessageHandler CreateHandler(string name, IServiceProvider contextServices)
         {
             ThrowHelper.ThrowIfNull(name);
 
             HttpClientFactoryOptions options = _optionsMonitor.Get(name);
-            Debug.Assert(options.SuppressHandlerScope || !options.PropagateContextScope);
 
             ActiveHandler activeHandler = GetOrCreateActiveHandler(name, options, contextServices);
             StartHandlerEntryTimer(activeHandler.Entry);
@@ -135,9 +134,7 @@ namespace Microsoft.Extensions.Http
                 {
                     if (!_activeHandlers.TryGetValue(name, out entry))
                     {
-                        ActiveHandler activeHandler = options.PropagateContextScope
-                            ? BuildNewContextAwareHandler(name, options, contextServices)
-                            : new ActiveHandler(CreateDetachedHandlerEntry(name, options));
+                        ActiveHandler activeHandler = CreateActiveHandler(name, options, contextServices, options.PropagateContextScope);
 
                         bool added = _activeHandlers.TryAdd(name, activeHandler.Entry);
                         Debug.Assert(added);
@@ -147,16 +144,16 @@ namespace Microsoft.Extensions.Http
                 }
             }
 
-            return options.PropagateContextScope
+            return options.IsKeyed
                 ? RebuildContextAwareHandler(name, options, contextServices, entry)
                 : new ActiveHandler(entry);
         }
 
-        internal ActiveEntry CreateDetachedHandlerEntry(string name, HttpClientFactoryOptions options)
+        internal ActiveHandler CreateActiveHandler(string name, HttpClientFactoryOptions options, IServiceProvider contextServices, bool isContextAware)
         {
-            IServiceProvider services = _services;
+            IServiceProvider services = contextServices;
             IServiceScope? scope = null;
-            if (!options.SuppressHandlerScope)
+            if (contextServices == _rootServices && !options.SuppressHandlerScope)
             {
                 scope = _scopeFactory.CreateScope();
                 services = scope.ServiceProvider;
@@ -165,9 +162,20 @@ namespace Microsoft.Extensions.Http
             try
             {
                 HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
+                SharedHttpHandler cachedHandler;
+                SharedHttpHandler? uncachedHandler = null;
 
-                // Wrap the handler so we can ensure the inner handler outlives the outer handler.
-                var handler = new SharedHttpHandler(builder.Build());
+                if (!isContextAware)
+                {
+                    // Wrap the handler so we can ensure the inner handler outlives the outer handler.
+                    cachedHandler = new SharedHttpHandler(builder.Build());
+                }
+                else
+                {
+                    // Wrap the handler so we can ensure the inner handler outlives the outer handler.
+                    cachedHandler = new SharedHttpHandler(builder.PrimaryHandler);
+                    uncachedHandler = BuildAndCompletePipeline(builder, cachedHandler);
+                }
 
                 // Note that we can't start the timer here. That would introduce a very very subtle race condition
                 // with very short expiry times. We need to wait until we've actually handed out the handler once
@@ -176,7 +184,9 @@ namespace Microsoft.Extensions.Http
                 // Otherwise it would be possible that we start the timer here, immediately expire it (very short
                 // timer) and then dispose it without ever creating a client. That would be bad. It's unlikely
                 // this would happen, but we want to be sure.
-                return new ActiveEntry(name, handler, scope, options.HandlerLifetime);
+                return new ActiveHandler(
+                    new ActiveEntry(name, cachedHandler, scope, options.HandlerLifetime),
+                    uncachedHandler);
             }
             catch
             {
@@ -186,18 +196,26 @@ namespace Microsoft.Extensions.Http
             }
         }
 
-        private ActiveHandler BuildNewContextAwareHandler(string name, HttpClientFactoryOptions options, IServiceProvider services)
+        private ActiveHandler RebuildContextAwareHandler(string name, HttpClientFactoryOptions options, IServiceProvider contextServices, ActiveEntry cachedPrimaryEntry)
         {
-            HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
-            SharedHttpHandler primaryHandler = new SharedHttpHandler(builder.PrimaryHandler);
+            IServiceProvider services = contextServices;
+            if (contextServices == _rootServices)
+            {
+                if (cachedPrimaryEntry.Scope is not null)
+                {
+                    services = cachedPrimaryEntry.Scope.ServiceProvider;
+                }
+                else if (!options.SuppressHandlerScope)
+                {
+                    // TODO!
+                    // need to create scope, but cachedPrimaryEntry is immutable
+                    // also -- how to ensure thread safety for context-aware handlers?
 
-            return new ActiveHandler(
-                new ActiveEntry(name, primaryHandler, scope: null, options.HandlerLifetime),
-                BuildAndCompletePipeline(builder, primaryHandler));
-        }
+                    // note: shouldn't this actually happen "under the lock" per name?
+                    throw new NotImplementedException();
+                }
+            }
 
-        private ActiveHandler RebuildContextAwareHandler(string name, HttpClientFactoryOptions options, IServiceProvider services, ActiveEntry cachedPrimaryEntry)
-        {
             HttpMessageHandlerBuilder builder = InitializeBuilder(name, options, services);
 
             if (builder is not DefaultHttpMessageHandlerBuilder b || b.PrimaryHandlerIsSet)

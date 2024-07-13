@@ -645,44 +645,47 @@ namespace Microsoft.Extensions.DependencyInjection
             return builder;
         }
 
-        public static IHttpClientBuilder AddKeyedServices(this IHttpClientBuilder builder)
+        public static IHttpClientBuilder AddAsKeyedScoped(this IHttpClientBuilder builder)
         {
             ThrowHelper.ThrowIfNull(builder);
 
             object key = builder.Name ?? KeyedService.AnyKey;
-            builder.Services.AddKeyedTransient<HttpClient>(key, KeyedClientFactory);
-            builder.Services.AddKeyedScoped<HttpMessageHandler>(key, KeyedHandlerFactory);
+            builder.Services.AddKeyedScoped(key, CreateKeyedClient);
+            builder.Services.AddKeyedScoped(key, CreateKeyedHandler);
             builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
             {
-                options.IsKeyedService = true;
+                options.KeyedLifetime = ServiceLifetime.Scoped;
             });
 
             return builder;
         }
 
-        public static IHttpClientBuilder PropagateContextScope(this IHttpClientBuilder builder, bool propagateContextScope = true)
+        private static HttpClient CreateKeyedClient(IServiceProvider services, object? key)
         {
-            ThrowHelper.ThrowIfNull(builder);
+            ThrowHelper.ThrowIfNull(key);
+            string name = (string)key;
 
-            builder.Services.Configure<HttpClientFactoryOptions>(builder.Name, options =>
+            IHttpClientFactory factory = services.GetRequiredService<IHttpClientFactory>();
+            if (factory is DefaultHttpClientFactory defaultFactory)
             {
-                options.SuppressHandlerScope |= propagateContextScope;
-                options.PropagateContextScope = propagateContextScope;
-            });
+                return defaultFactory.CreateClient(name, services);
+            }
 
-            return builder;
+            return factory.CreateClient(name);
         }
 
-        private static HttpClient KeyedClientFactory(IServiceProvider services, object? key)
+        private static HttpMessageHandler CreateKeyedHandler(IServiceProvider services, object? key)
         {
             ThrowHelper.ThrowIfNull(key);
-            return services.GetRequiredService<IHttpClientFactory>().CreateClient((string)key);
-        }
+            string name = (string)key;
 
-        private static HttpMessageHandler KeyedHandlerFactory(IServiceProvider services, object? key)
-        {
-            ThrowHelper.ThrowIfNull(key);
-            return services.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler((string)key);
+            IHttpMessageHandlerFactory factory = services.GetRequiredService<IHttpMessageHandlerFactory>();
+            if (factory is DefaultHttpClientFactory defaultFactory)
+            {
+                return defaultFactory.CreateHandler(name, services);
+            }
+
+            return factory.CreateHandler(name);
         }
 
         // See comments on HttpClientMappingRegistry.
