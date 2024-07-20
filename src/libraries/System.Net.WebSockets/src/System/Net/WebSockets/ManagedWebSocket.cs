@@ -58,8 +58,6 @@ namespace System.Net.WebSockets
         private readonly bool _isServer;
         /// <summary>The agreed upon subprotocol with the server.</summary>
         private readonly string? _subprotocol;
-        /// <summary>Timer used to send periodic pings to the server, at the interval specified</summary>
-        private readonly Timer? _keepAliveTimer;
         /// <summary>Buffer used for reading data from the network.</summary>
         private readonly Memory<byte> _receiveBuffer;
         /// <summary>
@@ -142,37 +140,42 @@ namespace System.Net.WebSockets
         /// <param name="isServer">true if this is the server-side of the connection; false if this is the client-side of the connection.</param>
         /// <param name="subprotocol">The agreed upon subprotocol for the connection.</param>
         /// <param name="keepAliveInterval">The interval to use for keep-alive pings.</param>
-        internal ManagedWebSocket(Stream stream, bool isServer, string? subprotocol, TimeSpan keepAliveInterval)
+        /// <param name="keepAliveTimeout">The timeout to use when waiting for keep-alive pong response.</param>
+        internal ManagedWebSocket(Stream stream, bool isServer, string? subprotocol, TimeSpan keepAliveInterval, TimeSpan keepAliveTimeout)
         {
             Debug.Assert(StateUpdateLock != null, $"Expected {nameof(StateUpdateLock)} to be non-null");
             Debug.Assert(stream != null, $"Expected non-null {nameof(stream)}");
             Debug.Assert(stream.CanRead, $"Expected readable {nameof(stream)}");
             Debug.Assert(stream.CanWrite, $"Expected writeable {nameof(stream)}");
             Debug.Assert(keepAliveInterval == Timeout.InfiniteTimeSpan || keepAliveInterval >= TimeSpan.Zero, $"Invalid {nameof(keepAliveInterval)}: {keepAliveInterval}");
+            Debug.Assert(keepAliveTimeout == Timeout.InfiniteTimeSpan || keepAliveTimeout >= TimeSpan.Zero, $"Invalid {nameof(keepAliveTimeout)}: {keepAliveTimeout}");
 
             _stream = stream;
             _isServer = isServer;
             _subprotocol = subprotocol;
 
-            // Create a buffer just large enough to handle received packet headers (at most 14 bytes) and
-            // control payloads (at most 125 bytes).  Message payloads are read directly into the buffer
-            // supplied to ReceiveAsync.
-            const int ReceiveBufferMinLength = MaxControlPayloadLength;
-            _receiveBuffer = new byte[ReceiveBufferMinLength];
-
-            // Now that we're opened, initiate the keep alive timer to send periodic pings.
-            // We use a weak reference from the timer to the web socket to avoid a cycle
-            // that could keep the web socket rooted in erroneous cases.
-            if (keepAliveInterval > TimeSpan.Zero)
+            if (keepAliveInterval > TimeSpan.Zero && keepAliveTimeout > TimeSpan.Zero)
             {
-                _keepAliveTimer = new Timer(static s =>
+                _keepAliveStrategy = KeepAliveStrategy.PingPong;
+                // we need to parse incoming messages to be able to process Pong responses
+                EnableReadAhead();
+
+                StartKeepAlivePingTimer(keepAliveInterval, keepAliveTimeout);
+            }
+            else
+            {
+                // Create a buffer just large enough to handle received packet headers (at most 14 bytes) and
+                // control payloads (at most 125 bytes).  Message payloads are read directly into the buffer
+                // supplied to ReceiveAsync.
+                const int ReceiveBufferMinLength = MaxControlPayloadLength;
+                _receiveBuffer = new byte[ReceiveBufferMinLength];
+
+                // Now that we're opened, initiate the keep alive timer to send periodic pongs
+                if (keepAliveInterval > TimeSpan.Zero)
                 {
-                    var wr = (WeakReference<ManagedWebSocket>)s!;
-                    if (wr.TryGetTarget(out ManagedWebSocket? thisRef))
-                    {
-                        thisRef.SendKeepAliveFrameAsync();
-                    }
-                }, new WeakReference<ManagedWebSocket>(this), keepAliveInterval, keepAliveInterval);
+                    _keepAliveStrategy = KeepAliveStrategy.UnsolicitedPong;
+                    StartUnsolicitedPongTimer(keepAliveInterval);
+                }
             }
         }
 
@@ -180,7 +183,7 @@ namespace System.Net.WebSockets
         /// <param name="stream">The connected Stream.</param>
         /// <param name="options">The options with which the websocket must be created.</param>
         internal ManagedWebSocket(Stream stream, WebSocketCreationOptions options)
-            : this(stream, options.IsServer, options.SubProtocol, options.KeepAliveInterval)
+            : this(stream, options.IsServer, options.SubProtocol, options.KeepAliveInterval, options.KeepAliveTimeout)
         {
             var deflateOptions = options.DangerousDeflateOptions;
 
@@ -585,26 +588,6 @@ namespace System.Net.WebSockets
             return headerLength + payloadLength;
         }
 
-        private void SendKeepAliveFrameAsync()
-        {
-            // This exists purely to keep the connection alive; don't wait for the result, and ignore any failures.
-            // The call will handle releasing the lock.  We send a pong rather than ping, since it's allowed by
-            // the RFC as a unidirectional heartbeat and we're not interested in waiting for a response.
-            ValueTask t = SendFrameAsync(MessageOpcode.Pong, endOfMessage: true, disableCompression: true, ReadOnlyMemory<byte>.Empty, CancellationToken.None);
-            if (t.IsCompletedSuccessfully)
-            {
-                t.GetAwaiter().GetResult();
-            }
-            else
-            {
-                // "Observe" any exception, ignoring it to prevent the unobserved exception event from being raised.
-                t.AsTask().ContinueWith(static p => { _ = p.Exception; },
-                    CancellationToken.None,
-                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-            }
-        }
-
         private static int WriteHeader(MessageOpcode opcode, byte[] sendBuffer, ReadOnlySpan<byte> payload, bool endOfMessage, bool useMask, bool compressed)
         {
             // Client header format:
@@ -732,7 +715,7 @@ namespace System.Net.WebSockets
                                         // number of bytes available, we could end up issuing a read that would erroneously wait
                                         // for data that would never arrive). Once that read completes, we can proceed with any
                                         // other reads necessary, and they'll have a reduced chance of pinning the receive buffer.
-                                        await _stream.ReadAsync(Memory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+                                        await StreamReadAsync(Memory<byte>.Empty, cancellationToken).ConfigureAwait(false);
                                     }
 
                                     await EnsureBufferContainsAsync(2, cancellationToken).ConfigureAwait(false);
@@ -839,8 +822,8 @@ namespace System.Net.WebSockets
                                     _inflater!.Memory.Slice(totalBytesReceived, bytesToRead) :
                                     payloadBuffer.Slice(totalBytesReceived, bytesToRead);
 
-                                int numBytesRead = await _stream.ReadAtLeastAsync(
-                                    readBuffer, bytesToRead, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                                int numBytesRead = await StreamReadAtLeastAsync(
+                                    readBuffer, bytesToRead, cancellationToken).ConfigureAwait(false);
                                 if (numBytesRead < bytesToRead)
                                 {
                                     ThrowEOFUnexpected();
@@ -1009,7 +992,7 @@ namespace System.Net.WebSockets
             // We simply issue a read and don't care what we get back; we could validate that we don't get
             // additional data, but at this point we're about to close the connection and we're just stalling
             // to try to get the server to close first.
-            ValueTask<int> finalReadTask = _stream.ReadAsync(_receiveBuffer, cancellationToken);
+            ValueTask<int> finalReadTask = StreamReadAsync(_receiveBuffer, cancellationToken);
             if (finalReadTask.IsCompletedSuccessfully)
             {
                 finalReadTask.GetAwaiter().GetResult();
@@ -1028,40 +1011,6 @@ namespace System.Net.WebSockets
                     Abort();
                     // Eat any resulting exceptions.  We were going to close the connection, anyway.
                 }
-            }
-        }
-
-        /// <summary>Processes a received ping or pong message.</summary>
-        /// <param name="header">The message header.</param>
-        /// <param name="cancellationToken">The CancellationToken used to cancel the websocket operation.</param>
-        private async ValueTask HandleReceivedPingPongAsync(MessageHeader header, CancellationToken cancellationToken)
-        {
-            // Consume any (optional) payload associated with the ping/pong.
-            if (header.PayloadLength > 0 && _receiveBufferCount < header.PayloadLength)
-            {
-                await EnsureBufferContainsAsync((int)header.PayloadLength, cancellationToken).ConfigureAwait(false);
-            }
-
-            // If this was a ping, send back a pong response.
-            if (header.Opcode == MessageOpcode.Ping)
-            {
-                if (_isServer)
-                {
-                    ApplyMask(_receiveBuffer.Span.Slice(_receiveBufferOffset, (int)header.PayloadLength), header.Mask, 0);
-                }
-
-                await SendFrameAsync(
-                    MessageOpcode.Pong,
-                    endOfMessage: true,
-                    disableCompression: true,
-                    _receiveBuffer.Slice(_receiveBufferOffset, (int)header.PayloadLength),
-                    cancellationToken).ConfigureAwait(false);
-            }
-
-            // Regardless of whether it was a ping or pong, we no longer need the payload.
-            if (header.PayloadLength > 0)
-            {
-                ConsumeFromBuffer((int)header.PayloadLength);
             }
         }
 
@@ -1413,8 +1362,8 @@ namespace System.Net.WebSockets
                 if (_receiveBufferCount < minimumRequiredBytes)
                 {
                     int bytesToRead = minimumRequiredBytes - _receiveBufferCount;
-                    int numRead = await _stream.ReadAtLeastAsync(
-                        _receiveBuffer.Slice(_receiveBufferCount), bytesToRead, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                    int numRead = await StreamReadAtLeastAsync(
+                        _receiveBuffer.Slice(_receiveBufferCount), bytesToRead, cancellationToken).ConfigureAwait(false);
                     _receiveBufferCount += numRead;
 
                     if (numRead < bytesToRead)

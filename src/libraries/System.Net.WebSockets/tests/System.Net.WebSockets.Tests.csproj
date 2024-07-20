@@ -7,13 +7,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="WebSocketCloseTests.cs" />
-    <Compile Include="WebSocketTests.cs" />
-    <Compile Include="WebSocketExceptionTests.cs" />
-    <Compile Include="WebSocketReceiveResultTests.cs" />
     <Compile Include="WebSocketCreateTest.cs" />
-    <Compile Include="WebSocketTestStream.cs" />
     <Compile Include="WebSocketDeflateOptionsTests.cs" />
     <Compile Include="WebSocketDeflateTests.cs" />
+    <Compile Include="WebSocketExceptionTests.cs" />
+    <Compile Include="WebSocketReceiveResultTests.cs" />
+    <Compile Include="WebSocketKeepAliveTests.cs" />
+    <Compile Include="WebSocketTests.cs" />
+    <Compile Include="WebSocketTestStream.cs" />
     <Compile Include="WebSocketUtf8Tests.cs" />
     <Compile Include="$(CommonTestPath)System\Net\Configuration.cs" Link="Common\System\Net\Configuration.cs" />
     <Compile Include="$(CommonTestPath)System\Net\Configuration.WebSockets.cs" Link="Common\System\Net\Configuration.WebSockets.cs" />
