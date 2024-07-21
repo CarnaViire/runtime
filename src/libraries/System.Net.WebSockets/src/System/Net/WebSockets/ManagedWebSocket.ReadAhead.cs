@@ -1,6 +1,8 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -184,109 +186,295 @@ namespace System.Net.WebSockets
             }
         }
 
-        private void ProcessFirstHeaderByte(byte firstHeaderByte)
+        private void ProcessData(Span<byte> buffer, bool commitToDownstream)
         {
-            _readAhead!.State = FrameReadAheadState.Header;
-            _readAhead.CurrentMessageOpcode = (MessageOpcode)(firstHeaderByte & 0xF);
-            _readAhead.HeaderBuffer.AvailableSpan[0] = firstHeaderByte;
-            _readAhead.HeaderBuffer.Commit(1);
+            Debug.Assert(_readAhead!.State != FrameReadAheadState.Faulted);
+
+            while (buffer.Length > 0 || _readAhead.State == FrameReadAheadState.HeaderRead || _readAhead.State == FrameReadAheadState.PayloadRead)
+            {
+                int bytesProcessed;
+                switch (_readAhead.State)
+                {
+                    case FrameReadAheadState.None: // transitions to HeaderStarted or Faulted
+                        ProcessFirstHeaderByte(_readAhead, buffer[0], _isServer, commitToDownstream);
+                        bytesProcessed = 1;
+                        break;
+                    case FrameReadAheadState.HeaderStarted: // transitions to HeaderLengthKnown or HeaderRead or Faulted
+                        ProcessSecondHeaderByte(_readAhead, buffer[0], commitToDownstream);
+                        bytesProcessed = 1;
+                        break;
+                    case FrameReadAheadState.HeaderLengthKnown: // transitions to HeaderRead (or remains in HeaderLengthKnown)
+                        bytesProcessed = ProcessRemainingHeaderBytes(_readAhead, buffer, commitToDownstream);
+                        break;
+                    case FrameReadAheadState.HeaderRead: // transitions to PayloadStarted or PayloadRead
+                        OnHeaderRead();
+                        bytesProcessed = 0;
+                        break;
+                    case FrameReadAheadState.PayloadStarted: // transitions to PayloadRead (or remains in PayloadStarted)
+                        bytesProcessed = ProcessPayloadBytes(_readAhead, buffer, commitToDownstream);
+                        break;
+                    case FrameReadAheadState.PayloadRead: // transitions to None
+                        OnPayloadRead();
+                        bytesProcessed = 0;
+                        break;
+                    case FrameReadAheadState.Faulted: // TERMINAL: bad pong frame received, let the downstream handle everything after that
+                        CommitToDownstream(_readAhead, buffer);
+                        bytesProcessed = buffer.Length;
+                        break;
+                    default:
+                        throw new InvalidOperationException();
+                }
+
+                buffer = buffer.Slice(bytesProcessed);
+            }
         }
 
-        private void ProcessSecondHeaderByte(byte secondHeaderByte)
+        private static void ProcessFirstHeaderByte(ReadAhead ra, byte firstHeaderByte, bool commitToDownstream)
         {
+            Debug.Assert(ra.State == FrameReadAheadState.None);
+            Debug.Assert(ra.PongFrameBuffer.ActiveLength == 0);
+
+            MessageOpcode opcode = (MessageOpcode)(firstHeaderByte & 0xF);
+            ra.IsPongFrame = opcode == MessageOpcode.Pong; // We will be "holding back" a Pong frame until we've read it completely.
+
+            if (ra.IsPongFrame)
+            {
+                // RFC 6455: Control frames MUST NOT be fragmented.
+                bool fin = (firstHeaderByte & 0x80) != 0;
+
+                if (!fin) // Bad frame. Let the downstream handle everything after that.
+                {
+                    ra.State = FrameReadAheadState.Faulted;
+                    if (commitToDownstream)
+                    {
+                        CommitToDownstream(ra, new Span<byte>(ref firstHeaderByte));
+                    }
+                    return;
+                }
+            }
+
+            Commit(ra, new Span<byte>(ref firstHeaderByte), commitToDownstream);
+            ra.State = FrameReadAheadState.HeaderStarted;
+        }
+
+        private static void ProcessSecondHeaderByte(ReadAhead ra, byte secondHeaderByte, bool isServer, bool commitToDownstream)
+        {
+            Debug.Assert(ra.State == FrameReadAheadState.HeaderStarted);
+
+            bool isMasked = (secondHeaderByte & 0x80) != 0;
+            // RFC 6455: The server MUST close the connection upon receiving a frame that is not masked.
+            // A client MUST close a connection if it detects a masked frame.
+            if (isServer != isMasked) // isServer && !isMasked || !isServer && isMasked
+            {
+                // Bad frame. Let the downstream handle everything after that.
+                MarkAsFaulted(ra, secondHeaderByte, commitToDownstream);
+                return;
+            }
+
             int payloadLength = secondHeaderByte & 0x7F;
+
+            // RFC 6455: All control frames MUST have a payload length of 125 bytes or less.
+            if (ra.IsPongFrame && payloadLength > MaxControlPayloadLength)
+            {
+                // Bad frame. Let the downstream handle everything after that.
+                MarkAsFaulted(ra, secondHeaderByte, commitToDownstream);
+                return;
+            }
 
             if (payloadLength == 126)
             {
-                _readAhead!.HeaderPayloadLengthSize = 2;
+                ra.ExtPayloadLengthBytes = 2;
+                ra.PayloadBytesRemaining = -1; // need to parse later
             }
             else if (payloadLength == 127)
             {
-                _readAhead!.HeaderPayloadLengthSize = 8;
+                ra.ExtPayloadLengthBytes = 8;
+                ra.PayloadBytesRemaining = -1; // need to parse later
             }
-
-            bool masked = (secondHeaderByte & 0x80) != 0;
-
-            _readAhead!.HeaderBuffer.AvailableSpan[0] = secondHeaderByte;
-            _readAhead.HeaderBuffer.Commit(1);
-
-            _readAhead.HeaderBytesRemaining = _readAhead.HeaderPayloadLengthSize + (masked ? 4 : 0);
-        }
-
-        private int ProcessHeaderBytes(Span<byte> buffer)
-        {
-            int bytesToRead = Math.Min(_readAhead!.HeaderBytesRemaining, buffer.Length);
-
-            buffer.Slice(0, bytesToRead).CopyTo(_readAhead.HeaderBuffer.AvailableSpan);
-            _readAhead.HeaderBuffer.Commit(bytesToRead);
-
-            _readAhead.HeaderBytesRemaining -= bytesToRead;
-
-            return bytesToRead;
-        }
-
-        private void ProcessData(Span<byte> buffer)
-        {
-            //All control frames MUST have a payload length of 125 bytes or less
-   //and MUST NOT be fragmented.
-
-            while (buffer.Length > 0)
+            else
             {
-                if (_readAhead!.State == FrameReadAheadState.None)
-                {
-                    ProcessFirstHeaderByte(buffer[0]);
-                    buffer = buffer.Slice(1);
-                }
-                else if (_readAhead.State == FrameReadAheadState.Header)
-                {
-                    if (_readAhead.HeaderBuffer.AvailableLength == 1) // we are reading the second byte of the header
-                    {
-                        ProcessSecondHeaderByte(buffer[0]);
-                        buffer = buffer.Slice(1);
-                    }
-                    else
-                    {
-                        int bytesRead = ProcessHeaderBytes(buffer);
-                        buffer = buffer.Slice(bytesRead);
-                    }
+                ra.ExtPayloadLengthBytes = 0;
+                ra.PayloadBytesRemaining = payloadLength;
+            }
 
-                    if (_readAhead.HeaderBytesRemaining == 0)
-                    {
-                        _readAhead.State = FrameReadAheadState.HeaderRead;
-                    }
-                }
-                else if (_readAhead.State == FrameReadAheadState.HeaderRead)
-                {
+            ra.ExtPayloadLengthBuffer.EnsureAvailableSpace(ra.ExtPayloadLengthBytes);
 
+            ra.HeaderBytesRemaining = ra.ExtPayloadLengthBytes + (isMasked ? 4 : 0);
+
+            Commit(ra, new Span<byte>(ref secondHeaderByte), commitToDownstream);
+
+            ra.State = ra.HeaderBytesRemaining != 0
+                ? FrameReadAheadState.HeaderLengthKnown
+                : FrameReadAheadState.HeaderRead;
+
+            static void MarkAsFaulted(ReadAhead ra, byte secondHeaderByte, bool commitToDownstream)
+            {
+                ra.State = FrameReadAheadState.Faulted;
+                if (commitToDownstream)
+                {
+                    if (ra.IsPongFrame)
+                    {
+                        // Make sure the first byte is passed downstream as well.
+                        CommitToDownstream(ra, ra.PongFrameBuffer.ActiveSpan);
+                    }
+                    CommitToDownstream(ra, new Span<byte>(ref secondHeaderByte));
                 }
             }
+        }
+
+        private static int ProcessRemainingHeaderBytes(ReadAhead ra, Span<byte> buffer, bool commitToDownstream)
+        {
+            Debug.Assert(ra.State == FrameReadAheadState.HeaderLengthKnown);
+            Debug.Assert(ra.HeaderBytesRemaining > 0);
+            Debug.Assert(buffer.Length > 0);
+
+            int bytesToCommit = Math.Min(ra.HeaderBytesRemaining, buffer.Length);
+            Commit(ra, buffer.Slice(0, bytesToCommit), commitToDownstream);
+            ra.HeaderBytesRemaining -= bytesToCommit;
+
+            if (ra.HeaderBytesRemaining == 0)
+            {
+                ra.State = FrameReadAheadState.HeaderRead;
+            }
+            return bytesToCommit;
+        }
+
+        private void OnHeaderRead()
+        {
+            Debug.Assert(_readAhead!.State == FrameReadAheadState.HeaderRead);
+            Debug.Assert(_readAhead.ExtPayloadLengthBuffer.ActiveLength == _readAhead.ExtPayloadLengthBytes);
+
+            if (_readAhead.ExtPayloadLengthBytes == 2)
+            {
+                Debug.Assert(_readAhead.PayloadBytesRemaining == -1);
+                _readAhead.PayloadBytesRemaining = BinaryPrimitives.ReadInt16BigEndian(_readAhead.ExtPayloadLengthBuffer.ActiveSpan);
+            }
+            else if (_readAhead.ExtPayloadLengthBytes == 8)
+            {
+                Debug.Assert(_readAhead.PayloadBytesRemaining == -1);
+                _readAhead.PayloadBytesRemaining = BinaryPrimitives.ReadInt64BigEndian(_readAhead.ExtPayloadLengthBuffer.ActiveSpan);
+            }
+            else
+            {
+                Debug.Assert(_readAhead.ExtPayloadLengthBytes == 0 && _readAhead.PayloadBytesRemaining >= 0);
+            }
+
+            _readAhead.ExtPayloadLengthBuffer.ClearAndReturnBuffer();
+
+            // RFC 6455: frame-payload-length-63 = %x0000000000000000-7FFFFFFFFFFFFFFF ; 64 bits in length
+            if (_readAhead.PayloadBytesRemaining < 0)
+            {
+                // Bad frame. Let the downstream handle everything after that.
+                _readAhead.State = FrameReadAheadState.Faulted;
+                return;
+            }
+
+            _readAhead.State = _readAhead.PayloadBytesRemaining == 0
+                ? FrameReadAheadState.PayloadRead
+                : FrameReadAheadState.PayloadStarted;
+        }
+
+        private static int ProcessPayloadBytes(ReadAhead ra, Span<byte> buffer, bool commitToDownstream)
+        {
+            Debug.Assert(ra.State == FrameReadAheadState.PayloadStarted);
+            Debug.Assert(ra.PayloadBytesRemaining > 0);
+            Debug.Assert(buffer.Length > 0);
+
+            int bytesToCommit = (int)Math.Min(ra.PayloadBytesRemaining, buffer.Length);
+            Commit(ra, buffer.Slice(0, bytesToCommit), commitToDownstream);
+            ra.PayloadBytesRemaining -= bytesToCommit;
+
+            if (ra.PayloadBytesRemaining == 0)
+            {
+                ra.State = FrameReadAheadState.PayloadRead;
+            }
+            return bytesToCommit;
+        }
+
+        private void OnPayloadRead()
+        {
+            Debug.Assert(_readAhead!.State == FrameReadAheadState.PayloadRead);
+
+            if (_readAhead.IsPongFrame)
+            {
+
+            }
+
+        }
+
+        private static void Commit(ReadAhead ra, Span<byte> buffer, bool commitToDownstream)
+        {
+            Debug.Assert(ra.State != FrameReadAheadState.Faulted);
+
+            if (ra.IsPongFrame)
+            {
+                CommitToPongFrameBuffer(ra, buffer);
+            }
+            else if (commitToDownstream)
+            {
+                CommitToDownstream(ra, buffer);
+            }
+        }
+
+        private static void CommitToDownstream(ReadAhead ra, Span<byte> buffer)
+        {
+            lock (ra.BufferLock)
+            {
+                ra.Buffer.EnsureAvailableSpace(buffer.Length);
+                buffer.CopyTo(ra.Buffer.AvailableSpan);
+                ra.Buffer.Commit(buffer.Length);
+            }
+        }
+
+        private static void CommitToPongFrameBuffer(ReadAhead ra, Span<byte> buffer)
+        {
+            Debug.Assert(ra.IsPongFrame);
+            Debug.Assert(ra.PongFrameBuffer.AvailableLength >= buffer.Length);
+
+            buffer.CopyTo(ra.PongFrameBuffer.AvailableSpan);
+            ra.PongFrameBuffer.Commit(buffer.Length);
         }
 
         private enum FrameReadAheadState
         {
             None,
-            Header,
+            HeaderStarted, // first byte read
+            HeaderLengthKnown, // second byte read
             HeaderRead,
-            Payload,
+            PayloadStarted,
+            PayloadRead,
+            Faulted
         }
 
-        private class ReadAhead
+        private class ReadAhead : IDisposable
         {
-            public const int MaxFrameHeaderSize = 14;
-            public const int MaxFrameSize = 16384;
+            public const int MaxPongFrameSize = 2 + 4 + 125; // 2 bytes for header, 4 bytes for mask, 125 bytes for payload
+            public const int MaxStreamReadSize = 16384;
             public const int MaxBufferSize = 65535;
 
             public readonly AsyncMutex StreamMutex = new AsyncMutex();
             public object BufferLock => this;
             public ArrayBuffer Buffer = new ArrayBuffer(0, usePool: true);
-            public byte[] InternalBuffer = new byte[MaxFrameSize];
-            public ArrayBuffer HeaderBuffer = new ArrayBuffer(MaxFrameHeaderSize, usePool: true);
+            public ArrayBuffer StreamReadBuffer = new ArrayBuffer(0, usePool: true);
+            public ArrayBuffer PongFrameBuffer = new ArrayBuffer(MaxPongFrameSize);
+            public ArrayBuffer ExtPayloadLengthBuffer = new ArrayBuffer(0, usePool: true);
 
             public FrameReadAheadState State;
-            public int PayloadBytesRemaining;
+            public long PayloadBytesRemaining;
             public int HeaderBytesRemaining;
-            public int HeaderPayloadLengthSize;
-            public MessageOpcode CurrentMessageOpcode;
+            public int ExtPayloadLengthBytes;
+            //public bool IsMasked;
+            public bool IsPongFrame;
+
+            public bool IsFaulted => State == FrameReadAheadState.Faulted;
+
+            public void Dispose()
+            {
+                Buffer.Dispose();
+                StreamReadBuffer.Dispose();
+                PongFrameBuffer.Dispose();
+                ExtPayloadLengthBuffer.Dispose();
+            }
         }
     }
 }

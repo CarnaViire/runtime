@@ -162,6 +162,11 @@ namespace System.Net.WebSockets
             }
         }
 
+        private void OnPongReceived(long payload)
+        {
+
+        }
+
         private void SendPingNoThrow(long pingPayload)
         {
             ValueTask t = SendPingAsync(pingPayload, CancellationToken.None);
