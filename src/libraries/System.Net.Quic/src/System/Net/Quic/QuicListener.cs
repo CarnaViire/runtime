@@ -20,15 +20,17 @@ using STOP_COMPLETE_DATA = Microsoft.Quic.QUIC_LISTENER_EVENT._Anonymous_e__Unio
 
 namespace System.Net.Quic;
 
+#region MsQuic Implementation
+
 /// <summary>
 /// Represents a listener that listens for incoming QUIC connections, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-connections">RFC 9000: Connections</see> for more details.
-/// <see cref="QuicListener" /> allows accepting multiple <see cref="QuicConnection" />.
+/// <see cref="MsQuicListener" /> allows accepting multiple <see cref="QuicConnection" />.
 /// </summary>
 /// <remarks>
-/// Unlike the connection and stream, <see cref="QuicListener" /> lifetime is not linked to any of the accepted connections.
+/// Unlike the connection and stream, <see cref="MsQuicListener" /> lifetime is not linked to any of the accepted connections.
 /// It can be safely disposed while keeping the accepted connection alive. The <see cref="DisposeAsync"/> will only stop listening for any other inbound connections.
 /// </remarks>
-public sealed partial class QuicListener : IAsyncDisposable
+internal sealed partial class MsQuicListener : QuicListener
 {
     /// <summary>
     /// Returns <c>true</c> if QUIC is supported on the current machine and can be used; otherwise, <c>false</c>.
@@ -40,15 +42,15 @@ public sealed partial class QuicListener : IAsyncDisposable
     [SupportedOSPlatformGuard("windows")]
     [SupportedOSPlatformGuard("linux")]
     [SupportedOSPlatformGuard("osx")]
-    public static bool IsSupported => MsQuicApi.IsQuicSupported;
+    public static new bool IsSupported => MsQuicApi.IsQuicSupported;
 
     /// <summary>
-    /// Creates a new <see cref="QuicListener"/> and starts listening for new connections.
+    /// Creates a new <see cref="MsQuicListener"/> and starts listening for new connections.
     /// </summary>
     /// <param name="options">Options for the listener.</param>
-    /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
+    /// <param name="_">A cancellation token that can be used to cancel the asynchronous operation.</param>
     /// <returns>An asynchronous task that completes with the started listener.</returns>
-    public static ValueTask<QuicListener> ListenAsync(QuicListenerOptions options, CancellationToken cancellationToken = default)
+    public static new ValueTask<MsQuicListener> ListenAsync(QuicListenerOptions options, CancellationToken _ = default)
     {
         if (!IsSupported)
         {
@@ -58,7 +60,7 @@ public sealed partial class QuicListener : IAsyncDisposable
         // Validate and fill in defaults for the options.
         options.Validate(nameof(options));
 
-        QuicListener listener = new QuicListener(options);
+        MsQuicListener listener = new MsQuicListener(options);
 
         if (NetEventSource.Log.IsEnabled())
         {
@@ -107,16 +109,16 @@ public sealed partial class QuicListener : IAsyncDisposable
     /// <summary>
     /// The actual listening endpoint.
     /// </summary>
-    public IPEndPoint LocalEndPoint { get; }
+    public override IPEndPoint LocalEndPoint { get; }
 
     /// <inheritdoc />
     public override string ToString() => _handle.ToString();
 
     /// <summary>
-    /// Initializes and starts a new instance of a <see cref="QuicListener" />.
+    /// Initializes and starts a new instance of a <see cref="MsQuicListener" />.
     /// </summary>
     /// <param name="options">Options to start the listener.</param>
-    private unsafe QuicListener(QuicListenerOptions options)
+    private unsafe MsQuicListener(QuicListenerOptions options)
     {
         GCHandle context = GCHandle.Alloc(this, GCHandleType.Weak);
         try
@@ -173,7 +175,7 @@ public sealed partial class QuicListener : IAsyncDisposable
     /// </remarks>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
     /// <returns>A task that will contain a fully connected <see cref="QuicConnection" /> which successfully finished the handshake and is ready to be used.</returns>
-    public async ValueTask<QuicConnection> AcceptConnectionAsync(CancellationToken cancellationToken = default)
+    public override async ValueTask<QuicConnection> AcceptConnectionAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -183,7 +185,7 @@ public sealed partial class QuicListener : IAsyncDisposable
             object item = await _acceptQueue.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
             Interlocked.Increment(ref _pendingConnectionsCapacity);
 
-            if (item is QuicConnection connection)
+            if (item is MsQuicConnection connection)
             {
                 return connection;
             }
@@ -206,12 +208,12 @@ public sealed partial class QuicListener : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// The method is <c>async void</c> on purpose so it starts an operation but doesn't wait for the result from the caller's perspective.
-    /// It does await <see cref="QuicConnection.FinishHandshakeAsync"/> but that never gets propagated to the caller for which the method ends with the first asynchronously processed <c>await</c>.
+    /// It does await <see cref="MsQuicConnection.FinishHandshakeAsync"/> but that never gets propagated to the caller for which the method ends with the first asynchronously processed <c>await</c>.
     /// Once the asynchronous processing finishes, the result is stored in <c>_acceptQueue</c>.
     /// </remarks>
     /// <param name="connection">The new connection.</param>
     /// <param name="clientHello">The TLS ClientHello data.</param>
-    private async void StartConnectionHandshake(QuicConnection connection, SslClientHelloInfo clientHello)
+    private async void StartConnectionHandshake(MsQuicConnection connection, SslClientHelloInfo clientHello)
     {
         // Yield to the threadpool immediately. This makes sure the connection options callback
         // provided by the user is not invoked from the MsQuic thread and cannot delay acks
@@ -251,7 +253,7 @@ public sealed partial class QuicListener : IAsyncDisposable
         }
         catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
-            // Handshake stopped by QuicListener.DisposeAsync:
+            // Handshake stopped by MsQuicListener.DisposeAsync:
             // 1. Dispose the connection and by that shut it down --> application error code doesn't matter here as this is a transport error.
             // 2. Connection won't be handed out since listener has stopped --> do not propagate anything.
 
@@ -334,7 +336,7 @@ public sealed partial class QuicListener : IAsyncDisposable
             return QUIC_STATUS_CONNECTION_REFUSED;
         }
 
-        QuicConnection connection = new QuicConnection(data.Connection, data.Info);
+        MsQuicConnection connection = new MsQuicConnection(data.Connection, data.Info);
 
         if (NetEventSource.Log.IsEnabled())
         {
@@ -371,7 +373,7 @@ public sealed partial class QuicListener : IAsyncDisposable
         GCHandle stateHandle = GCHandle.FromIntPtr((IntPtr)context);
 
         // Check if the instance hasn't been collected.
-        if (!stateHandle.IsAllocated || stateHandle.Target is not QuicListener instance)
+        if (!stateHandle.IsAllocated || stateHandle.Target is not MsQuicListener instance)
         {
             if (NetEventSource.Log.IsEnabled())
             {
@@ -403,7 +405,7 @@ public sealed partial class QuicListener : IAsyncDisposable
     /// Stops listening for new connections and releases all resources associated with the listener.
     /// </summary>
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, true))
         {
@@ -439,4 +441,52 @@ public sealed partial class QuicListener : IAsyncDisposable
             }
         }
     }
+}
+
+#endregion // MsQuic Implementation
+
+// -------------------------------
+
+/// <summary>
+/// Represents a listener that listens for incoming QUIC connections, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-connections">RFC 9000: Connections</see> for more details.
+/// <see cref="QuicListener" /> allows accepting multiple <see cref="QuicConnection" />.
+/// </summary>
+/// <remarks>
+/// Unlike the connection and stream, <see cref="QuicListener" /> lifetime is not linked to any of the accepted connections.
+/// It can be safely disposed while keeping the accepted connection alive. The <see cref="DisposeAsync"/> will only stop listening for any other inbound connections.
+/// </remarks>
+public abstract partial class QuicListener : IAsyncDisposable
+{
+    /// <summary>
+    /// Returns <c>true</c> if QUIC is supported on the current machine and can be used; otherwise, <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// The current implementation depends on <see href="https://github.com/microsoft/msquic">MsQuic</see> native library, this property checks its presence (Linux machines).
+    /// It also checks whether TLS 1.3, requirement for QUIC protocol, is available and enabled (Windows machines).
+    /// </remarks>
+    [SupportedOSPlatformGuard("windows")]
+    [SupportedOSPlatformGuard("linux")]
+    [SupportedOSPlatformGuard("osx")]
+    public static bool IsSupported => MsQuicListener.IsSupported;
+
+    /// <summary>
+    /// Creates a new <see cref="QuicListener"/> and starts listening for new connections.
+    /// </summary>
+    /// <param name="options">Options for the listener.</param>
+    /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
+    /// <returns>An asynchronous task that completes with the started listener.</returns>
+    public static async ValueTask<QuicListener> ListenAsync(QuicListenerOptions options, CancellationToken cancellationToken = default)
+    {
+        return await MsQuicListener.ListenAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    public abstract IPEndPoint LocalEndPoint { get; }
+
+    public abstract ValueTask<QuicConnection> AcceptConnectionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops listening for new connections and releases all resources associated with the listener.
+    /// </summary>
+    /// <returns>A task that represents the asynchronous dispose operation.</returns>
+    public abstract ValueTask DisposeAsync();
 }

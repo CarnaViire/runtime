@@ -20,9 +20,8 @@ namespace System.Net.Quic
         public System.Net.IPEndPoint? LocalEndPoint { get { throw null; } set { } }
         public System.Net.EndPoint RemoteEndPoint { get { throw null; } set { } }
     }
-    public sealed partial class QuicConnection : System.IAsyncDisposable
+    public abstract partial class QuicConnection : System.IAsyncDisposable
     {
-        internal QuicConnection() { }
         [Runtime.Versioning.SupportedOSPlatformGuard("windows")]
         [Runtime.Versioning.SupportedOSPlatformGuard("linux")]
         [Runtime.Versioning.SupportedOSPlatformGuard("osx")]
@@ -77,9 +76,8 @@ namespace System.Net.Quic
         public System.Net.Quic.QuicError QuicError { get { throw null; } }
         public long? TransportErrorCode { get { throw null; } }
     }
-    public sealed partial class QuicListener : System.IAsyncDisposable
+    public abstract partial class QuicListener : System.IAsyncDisposable
     {
-        internal QuicListener() { }
         [Runtime.Versioning.SupportedOSPlatformGuard("windows")]
         [Runtime.Versioning.SupportedOSPlatformGuard("linux")]
         [Runtime.Versioning.SupportedOSPlatformGuard("osx")]
@@ -111,9 +109,8 @@ namespace System.Net.Quic
         public QuicServerConnectionOptions() { }
         public System.Net.Security.SslServerAuthenticationOptions ServerAuthenticationOptions { get { throw null; } set { } }
     }
-    public sealed partial class QuicStream : System.IO.Stream
+    public abstract partial class QuicStream : System.IO.Stream
     {
-        internal QuicStream() { }
         public override bool CanRead { get { throw null; } }
         public override bool CanSeek { get { throw null; } }
         public override bool CanTimeout { get { throw null; } }

@@ -27,6 +27,8 @@ using SHUTDOWN_INITIATED_BY_TRANSPORT_DATA = Microsoft.Quic.QUIC_CONNECTION_EVEN
 
 namespace System.Net.Quic;
 
+#region MsQuic Implementation
+
 /// <summary>
 /// Represents a QUIC connection, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-connections">RFC 9000: Connections</see> for more details.
 /// <see cref="QuicConnection" /> itself doesn't send or receive data but rather allows opening and/or accepting multiple <see cref="QuicStream" />.
@@ -38,7 +40,7 @@ namespace System.Net.Quic;
 /// Each connection can then open outbound stream: <see cref="QuicConnection.OpenOutboundStreamAsync(QuicStreamType, CancellationToken)" />,
 /// or accept an inbound stream: <see cref="QuicConnection.AcceptInboundStreamAsync(CancellationToken)" />.
 /// </remarks>
-public sealed partial class QuicConnection : IAsyncDisposable
+internal sealed partial class MsQuicConnection : QuicConnection
 {
     /// <summary>
     /// Returns <c>true</c> if QUIC is supported on the current machine and can be used; otherwise, <c>false</c>.
@@ -47,18 +49,15 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// The current implementation depends on <see href="https://github.com/microsoft/msquic">MsQuic</see> native library, this property checks its presence (Linux machines).
     /// It also checks whether TLS 1.3, requirement for QUIC protocol, is available and enabled (Windows machines).
     /// </remarks>
-    [SupportedOSPlatformGuard("windows")]
-    [SupportedOSPlatformGuard("linux")]
-    [SupportedOSPlatformGuard("osx")]
-    public static bool IsSupported => MsQuicApi.IsQuicSupported;
+    public static new bool IsSupported => MsQuicApi.IsQuicSupported;
 
     /// <summary>
-    /// Creates a new <see cref="QuicConnection"/> and connects it to the peer.
+    /// Creates a new <see cref="MsQuicConnection"/> and connects it to the peer.
     /// </summary>
     /// <param name="options">Options for the connection.</param>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
     /// <returns>An asynchronous task that completes with the connected connection.</returns>
-    public static ValueTask<QuicConnection> ConnectAsync(QuicClientConnectionOptions options, CancellationToken cancellationToken = default)
+    public static new ValueTask<MsQuicConnection> ConnectAsync(QuicClientConnectionOptions options, CancellationToken cancellationToken = default)
     {
         if (!IsSupported)
         {
@@ -69,9 +68,9 @@ public sealed partial class QuicConnection : IAsyncDisposable
         options.Validate(nameof(options));
         return StartConnectAsync(options, cancellationToken);
 
-        static async ValueTask<QuicConnection> StartConnectAsync(QuicClientConnectionOptions options, CancellationToken cancellationToken)
+        static async ValueTask<MsQuicConnection> StartConnectAsync(QuicClientConnectionOptions options, CancellationToken cancellationToken)
         {
-            QuicConnection connection = new QuicConnection();
+            MsQuicConnection connection = new MsQuicConnection();
 
             using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -121,7 +120,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
         {
             try
             {
-                if (target is QuicConnection connection)
+                if (target is MsQuicConnection connection)
                 {
                     // The OCE will be propagated through stored CancellationToken in ResettableValueTaskSource.
                     connection._shutdownTcs.TrySetResult();
@@ -146,7 +145,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     // Token that fires when the connection is closed.
     internal CancellationToken ConnectionShutdownToken => _shutdownTokenSource.Token;
 
-    private readonly Channel<QuicStream> _acceptQueue = Channel.CreateUnbounded<QuicStream>(new UnboundedChannelOptions()
+    private readonly Channel<MsQuicStream> _acceptQueue = Channel.CreateUnbounded<MsQuicStream>(new UnboundedChannelOptions()
     {
         SingleWriter = true
     });
@@ -168,7 +167,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// </summary>
     private bool _canAccept;
     /// <summary>
-    /// From <see cref="QuicConnectionOptions.DefaultStreamErrorCode"/>, passed to newly created <see cref="QuicStream"/>.
+    /// From <see cref="QuicConnectionOptions.DefaultStreamErrorCode"/>, passed to newly created <see cref="MsQuicStream"/>.
     /// </summary>
     private long _defaultStreamErrorCode;
     /// <summary>
@@ -187,7 +186,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// <summary>
     /// Occurres when an additional stream capacity has been released by the peer. Corresponds to receiving a MAX_STREAMS frame.
     /// </summary>
-    private Action<QuicConnection, QuicStreamCapacityChangedArgs>? _streamCapacityCallback;
+    private Action<MsQuicConnection, QuicStreamCapacityChangedArgs>? _streamCapacityCallback;
     /// <summary>
     /// Optimization to avoid `Action` instantiation with every <see cref="OpenOutboundStreamAsync(QuicStreamType, CancellationToken)"/>.
     /// Holds <see cref="DecrementStreamCapacity(QuicStreamType)"/> method.
@@ -217,10 +216,6 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// <summary>
     /// Set when CONNECTED is received.
     /// </summary>
-    private TlsCipherSuite _negotiatedCipherSuite;
-    /// <summary>
-    /// Set when CONNECTED is received.
-    /// </summary>
     private SslProtocols _negotiatedSslProtocol;
 
     /// <summary>
@@ -232,11 +227,11 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// <summary>
     /// The remote endpoint used for this connection.
     /// </summary>
-    public IPEndPoint RemoteEndPoint => _remoteEndPoint;
+    public override IPEndPoint RemoteEndPoint => _remoteEndPoint;
     /// <summary>
     /// The local endpoint used for this connection.
     /// </summary>
-    public IPEndPoint LocalEndPoint => _localEndPoint;
+    public override IPEndPoint LocalEndPoint => _localEndPoint;
 
     private async void OnStreamCapacityIncreased(int bidirectionalIncrement, int unidirectionalIncrement)
     {
@@ -276,13 +271,13 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// Gets the name of the server the client is trying to connect to. That name is used for server certificate validation. It can be a DNS name or an IP address.
     /// </summary>
     /// <returns>The name of the server the client is trying to connect to.</returns>
-    public string TargetHostName => _sslConnectionOptions.TargetHost;
+    public override string TargetHostName => _sslConnectionOptions.TargetHost;
 
     /// <summary>
     /// The certificate provided by the peer.
     /// For an outbound/client connection will always have the peer's (server) certificate; for an inbound/server one, only if the connection requested and the peer (client) provided one.
     /// </summary>
-    public X509Certificate? RemoteCertificate
+    public override X509Certificate? RemoteCertificate
     {
         get
         {
@@ -294,26 +289,20 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// <summary>
     /// Final, negotiated application protocol.
     /// </summary>
-    public SslApplicationProtocol NegotiatedApplicationProtocol => _negotiatedApplicationProtocol;
-
-    /// <summary>
-    /// Gets the cipher suite which was negotiated for this connection.
-    /// </summary>
-    [CLSCompliant(false)]
-    public TlsCipherSuite NegotiatedCipherSuite => _negotiatedCipherSuite;
+    public override SslApplicationProtocol NegotiatedApplicationProtocol => _negotiatedApplicationProtocol;
 
     /// <summary>
     /// Gets a <see cref="System.Security.Authentication.SslProtocols"/> value that indicates the security protocol used to authenticate this connection.
     /// </summary>
-    public SslProtocols SslProtocol => _negotiatedSslProtocol;
+    public override SslProtocols SslProtocol => _negotiatedSslProtocol;
 
     /// <inheritdoc />
     public override string ToString() => _handle.ToString();
 
     /// <summary>
-    /// Initializes a new instance of an outbound <see cref="QuicConnection" />.
+    /// Initializes a new instance of an outbound <see cref="MsQuicConnection" />.
     /// </summary>
-    private unsafe QuicConnection()
+    private unsafe MsQuicConnection()
     {
         GCHandle context = GCHandle.Alloc(this, GCHandleType.Weak);
         try
@@ -343,11 +332,11 @@ public sealed partial class QuicConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Initializes a new instance of an inbound <see cref="QuicConnection" />.
+    /// Initializes a new instance of an inbound <see cref="MsQuicConnection" />.
     /// </summary>
     /// <param name="handle">Native handle.</param>
     /// <param name="info">Related data from the NEW_CONNECTION listener event.</param>
-    internal unsafe QuicConnection(QUIC_HANDLE* handle, QUIC_NEW_CONNECTION_INFO* info)
+    internal unsafe MsQuicConnection(QUIC_HANDLE* handle, QUIC_NEW_CONNECTION_INFO* info)
     {
         GCHandle context = GCHandle.Alloc(this, GCHandleType.Weak);
         try
@@ -487,7 +476,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
 
     /// <summary>
     /// In order to provide meaningful increments in <see cref="_streamCapacityCallback"/>, available streams count can be only manipulated from MsQuic thread.
-    /// For that purpose we pass this function to <see cref="QuicStream"/> so that it can call it from <c>START_COMPLETE</c> event handler.
+    /// For that purpose we pass this function to <see cref="MsQuicStream"/> so that it can call it from <c>START_COMPLETE</c> event handler.
     ///
     /// Note that MsQuic itself manipulates stream counts right before indicating <c>START_COMPLETE</c> event.
     /// </summary>
@@ -513,21 +502,21 @@ public sealed partial class QuicConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Create an outbound uni/bidirectional <see cref="QuicStream" />.
+    /// Create an outbound uni/bidirectional <see cref="MsQuicStream" />.
     /// In case the connection doesn't have any available stream capacity, i.e.: the peer limits the concurrent stream count,
     /// the operation will pend until the stream can be opened (other stream gets closed or peer increases the stream limit).
     /// </summary>
     /// <param name="type">The type of the stream, i.e. unidirectional or bidirectional.</param>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
-    /// <returns>An asynchronous task that completes with the opened <see cref="QuicStream" />.</returns>
-    public async ValueTask<QuicStream> OpenOutboundStreamAsync(QuicStreamType type, CancellationToken cancellationToken = default)
+    /// <returns>An asynchronous task that completes with the opened <see cref="MsQuicStream" />.</returns>
+    public override async ValueTask<QuicStream> OpenOutboundStreamAsync(QuicStreamType type, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        QuicStream? stream = null;
+        MsQuicStream? stream = null;
         try
         {
-            stream = new QuicStream(_handle, type, _defaultStreamErrorCode);
+            stream = new MsQuicStream(_handle, type, _defaultStreamErrorCode);
 
             if (NetEventSource.Log.IsEnabled())
             {
@@ -558,11 +547,11 @@ public sealed partial class QuicConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Accepts an inbound <see cref="QuicStream" />.
+    /// Accepts an inbound <see cref="MsQuicStream" />.
     /// </summary>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
-    /// <returns>An asynchronous task that completes with the accepted <see cref="QuicStream" />.</returns>
-    public async ValueTask<QuicStream> AcceptInboundStreamAsync(CancellationToken cancellationToken = default)
+    /// <returns>An asynchronous task that completes with the accepted <see cref="MsQuicStream" />.</returns>
+    public override async ValueTask<QuicStream> AcceptInboundStreamAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -601,7 +590,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// <param name="errorCode">Application provided code with the reason for closure.</param>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
     /// <returns>An asynchronous task that completes when the connection is closed.</returns>
-    public ValueTask CloseAsync(long errorCode, CancellationToken cancellationToken = default)
+    public override ValueTask CloseAsync(long errorCode, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ThrowHelper.ValidateErrorCode(nameof(errorCode), errorCode, $"{nameof(CloseAsync)}.{nameof(errorCode)}");
@@ -694,7 +683,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     }
     private unsafe int HandleEventPeerStreamStarted(ref PEER_STREAM_STARTED_DATA data)
     {
-        QuicStream stream = new QuicStream(_handle, data.Stream, data.Flags, _defaultStreamErrorCode);
+        MsQuicStream stream = new MsQuicStream(_handle, data.Stream, data.Flags, _defaultStreamErrorCode);
 
         if (NetEventSource.Log.IsEnabled())
         {
@@ -777,7 +766,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
         GCHandle stateHandle = GCHandle.FromIntPtr((IntPtr)context);
 
         // Check if the instance hasn't been collected.
-        if (!stateHandle.IsAllocated || stateHandle.Target is not QuicConnection instance)
+        if (!stateHandle.IsAllocated || stateHandle.Target is not MsQuicConnection instance)
         {
             if (NetEventSource.Log.IsEnabled())
             {
@@ -810,7 +799,7 @@ public sealed partial class QuicConnection : IAsyncDisposable
     /// And releases all resources associated with the connection.
     /// </summary>
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
-    public async ValueTask DisposeAsync()
+    public override async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, true))
         {
@@ -861,9 +850,65 @@ public sealed partial class QuicConnection : IAsyncDisposable
 
         // Flush the queue and dispose all remaining streams.
         _acceptQueue.Writer.TryComplete(ExceptionDispatchInfo.SetCurrentStackTrace(new ObjectDisposedException(GetType().FullName)));
-        while (_acceptQueue.Reader.TryRead(out QuicStream? stream))
+        while (_acceptQueue.Reader.TryRead(out MsQuicStream? stream))
         {
             await stream.DisposeAsync().ConfigureAwait(false);
         }
     }
+}
+
+#endregion //MsQuic Implementation
+
+// -----------------------------
+
+/// <summary>
+/// Represents a QUIC connection, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-connections">RFC 9000: Connections</see> for more details.
+/// <see cref="QuicConnection" /> itself doesn't send or receive data but rather allows opening and/or accepting multiple <see cref="QuicStream" />.
+/// </summary>
+/// <remarks>
+/// <see cref="QuicConnection" /> can either be accepted from <see cref="QuicListener.AcceptConnectionAsync(CancellationToken)" /> (inbound connection),
+/// or create with a static method <see cref="QuicConnection.ConnectAsync(System.Net.Quic.QuicClientConnectionOptions, CancellationToken)" /> (outbound connection).
+///
+/// Each connection can then open outbound stream: <see cref="QuicConnection.OpenOutboundStreamAsync(QuicStreamType, CancellationToken)" />,
+/// or accept an inbound stream: <see cref="QuicConnection.AcceptInboundStreamAsync(CancellationToken)" />.
+/// </remarks>
+public abstract partial class QuicConnection : IAsyncDisposable
+{
+    [SupportedOSPlatformGuard("windows")]
+    [SupportedOSPlatformGuard("linux")]
+    [SupportedOSPlatformGuard("osx")]
+    public static bool IsSupported => MsQuicConnection.IsSupported;
+
+    public static async ValueTask<QuicConnection> ConnectAsync(QuicClientConnectionOptions options, CancellationToken cancellationToken = default)
+    {
+        return await MsQuicConnection.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    public abstract IPEndPoint RemoteEndPoint { get; }
+
+    public abstract IPEndPoint LocalEndPoint { get; }
+
+    public abstract string TargetHostName { get; }
+
+    public abstract X509Certificate? RemoteCertificate { get; }
+
+    public abstract SslApplicationProtocol NegotiatedApplicationProtocol { get; }
+
+    [CLSCompliant(false)]
+    public TlsCipherSuite NegotiatedCipherSuite => _negotiatedCipherSuite;
+
+    public abstract SslProtocols SslProtocol { get; }
+
+    public abstract ValueTask<QuicStream> OpenOutboundStreamAsync(QuicStreamType type, CancellationToken cancellationToken = default);
+
+    public abstract ValueTask<QuicStream> AcceptInboundStreamAsync(CancellationToken cancellationToken = default);
+
+    public abstract ValueTask CloseAsync(long errorCode, CancellationToken cancellationToken = default);
+
+    public abstract ValueTask DisposeAsync();
+
+    /// <summary>
+    /// Set when CONNECTED is received.
+    /// </summary>
+    internal TlsCipherSuite _negotiatedCipherSuite;
 }

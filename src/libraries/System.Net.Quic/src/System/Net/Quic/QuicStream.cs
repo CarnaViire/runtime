@@ -21,6 +21,8 @@ using START_COMPLETE_DATA = Microsoft.Quic.QUIC_STREAM_EVENT._Anonymous_e__Union
 
 namespace System.Net.Quic;
 
+#region MsQuic Implementation
+
 /// <summary>
 /// Represents a QUIC stream, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-streams">RFC 9000: Streams</see> for more details.
 /// <see cref="QuicStream" /> can be <see cref="QuicStreamType.Unidirectional">unidirectional</see>, i.e.: write-only for the opening side,
@@ -52,17 +54,12 @@ namespace System.Net.Quic;
 /// </item>
 /// </list>
 /// </remarks>
-public sealed partial class QuicStream
+internal sealed partial class MsQuicStream : QuicStream
 {
     /// <summary>
     /// Handle to MsQuic connection object.
     /// </summary>
     private readonly MsQuicContextSafeHandle _handle;
-
-    /// <summary>
-    /// Set to true once disposed. Prevents double and/or concurrent disposal.
-    /// </summary>
-    private bool _disposed;
 
     private readonly ValueTaskSource _startedTcs = new ValueTaskSource();
     private readonly ValueTaskSource _shutdownTcs = new ValueTaskSource();
@@ -73,7 +70,7 @@ public sealed partial class QuicStream
         {
             try
             {
-                if (target is QuicStream stream)
+                if (target is MsQuicStream stream)
                 {
                     stream.Abort(QuicAbortDirection.Read, stream._defaultErrorCode);
                     stream._receiveTcs.TrySetResult();
@@ -96,7 +93,7 @@ public sealed partial class QuicStream
         {
             try
             {
-                if (target is QuicStream stream)
+                if (target is MsQuicStream stream)
                 {
                     stream.Abort(QuicAbortDirection.Write, stream._defaultErrorCode);
                 }
@@ -115,14 +112,11 @@ public sealed partial class QuicStream
 
     private readonly long _defaultErrorCode;
 
-    private readonly bool _canRead;
-    private readonly bool _canWrite;
-
     private long _id = -1;
     private readonly QuicStreamType _type;
 
     /// <summary>
-    /// Provided via <see cref="StartAsync(Action{QuicStreamType}, CancellationToken)" /> from <see cref="QuicConnection" /> so that <see cref="QuicStream"/> can decrement its available stream count field.
+    /// Provided via <see cref="StartAsync(Action{QuicStreamType}, CancellationToken)" /> from <see cref="QuicConnection" /> so that <see cref="MsQuicStream"/> can decrement its available stream count field.
     /// When <see cref="HandleEventStartComplete(ref START_COMPLETE_DATA)">START_COMPLETE</see> arrives it gets invoked and unset back to <c>null</c> to not to hold any unintended reference to <see cref="QuicConnection"/>.
     /// </summary>
     private Action<QuicStreamType>? _decrementStreamCapacity;
@@ -130,12 +124,12 @@ public sealed partial class QuicStream
     /// <summary>
     /// Stream id, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-stream-types-and-identifier" />.
     /// </summary>
-    public long Id => _id;
+    public override long Id => _id;
 
     /// <summary>
     /// Stream type, see <see href="https://www.rfc-editor.org/rfc/rfc9000.html#name-stream-types-and-identifier" />.
     /// </summary>
-    public QuicStreamType Type => _type;
+    public override QuicStreamType Type => _type;
 
     /// <summary>
     /// A <see cref="Task"/> that will get completed once reading side has been closed.
@@ -143,7 +137,7 @@ public sealed partial class QuicStream
     /// or when <see cref="Abort"/> for <see cref="QuicAbortDirection.Read"/> is called,
     /// or when the peer called <see cref="Abort"/> for <see cref="QuicAbortDirection.Write"/>.
     /// </summary>
-    public Task ReadsClosed => _receiveTcs.GetFinalTask(this);
+    public override Task ReadsClosed => _receiveTcs.GetFinalTask(this);
 
     /// <summary>
     /// A <see cref="Task"/> that will get completed once writing side has been closed.
@@ -152,18 +146,18 @@ public sealed partial class QuicStream
     /// or when <see cref="Abort"/> for <see cref="QuicAbortDirection.Write"/> is called,
     /// or when the peer called <see cref="Abort"/> for <see cref="QuicAbortDirection.Read"/>.
     /// </summary>
-    public Task WritesClosed => _sendTcs.GetFinalTask(this);
+    public override Task WritesClosed => _sendTcs.GetFinalTask(this);
 
     /// <inheritdoc />
     public override string ToString() => _handle.ToString();
 
     /// <summary>
-    /// Initializes a new instance of an outbound <see cref="QuicStream" />.
+    /// Initializes a new instance of an outbound <see cref="MsQuicStream" />.
     /// </summary>
     /// <param name="connectionHandle"><see cref="QuicConnection"/> safe handle, used to increment/decrement reference count with each associated stream.</param>
     /// <param name="type">The type of the stream to open.</param>
     /// <param name="defaultErrorCode">Error code used when the stream needs to abort read or write side of the stream internally.</param>
-    internal unsafe QuicStream(MsQuicContextSafeHandle connectionHandle, QuicStreamType type, long defaultErrorCode)
+    internal unsafe MsQuicStream(MsQuicContextSafeHandle connectionHandle, QuicStreamType type, long defaultErrorCode)
     {
         GCHandle context = GCHandle.Alloc(this, GCHandleType.Weak);
         try
@@ -199,13 +193,13 @@ public sealed partial class QuicStream
     }
 
     /// <summary>
-    /// Initializes a new instance of an inbound <see cref="QuicStream" />.
+    /// Initializes a new instance of an inbound <see cref="MsQuicStream" />.
     /// </summary>
     /// <param name="connectionHandle"><see cref="QuicConnection"/> safe handle, used to increment/decrement reference count with each associated stream.</param>
     /// <param name="handle">Native handle.</param>
     /// <param name="flags">Related data from the PEER_STREAM_STARTED connection event.</param>
     /// <param name="defaultErrorCode">Error code used when the stream needs to abort read or write side of the stream internally.</param>
-    internal unsafe QuicStream(MsQuicContextSafeHandle connectionHandle, QUIC_HANDLE* handle, QUIC_STREAM_OPEN_FLAGS flags, long defaultErrorCode)
+    internal unsafe MsQuicStream(MsQuicContextSafeHandle connectionHandle, QUIC_HANDLE* handle, QUIC_STREAM_OPEN_FLAGS flags, long defaultErrorCode)
     {
         GCHandle context = GCHandle.Alloc(this, GCHandleType.Weak);
         try
@@ -247,7 +241,7 @@ public sealed partial class QuicStream
     /// </summary>
     /// <param name="decrementStreamCapacity"></param>
     /// <param name="cancellationToken">A cancellation token that can be used to cancel the asynchronous operation.</param>
-    /// <returns>An asynchronous task that completes with the opened <see cref="QuicStream" />.</returns>
+    /// <returns>An asynchronous task that completes with the opened <see cref="MsQuicStream" />.</returns>
     internal ValueTask StartAsync(Action<QuicStreamType> decrementStreamCapacity, CancellationToken cancellationToken = default)
     {
         Debug.Assert(!_startedTcs.IsCompleted);
@@ -357,7 +351,7 @@ public sealed partial class QuicStream
     /// <param name="buffer">The region of memory to write data from.</param>
     /// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is <see cref="CancellationToken.None"/>.</param>
     /// <param name="completeWrites">Notifies the peer about gracefully closing the write side, i.e.: sends FIN flag with the data.</param>
-    public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, bool completeWrites, CancellationToken cancellationToken = default)
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, bool completeWrites, CancellationToken cancellationToken = default)
     {
         if (_disposed)
         {
@@ -449,7 +443,7 @@ public sealed partial class QuicStream
     /// </remarks>
     /// <param name="abortDirection">The direction of the stream to abort.</param>
     /// <param name="errorCode">The error code with which to abort the stream, this value is application protocol (layer above QUIC) dependent.</param>
-    public void Abort(QuicAbortDirection abortDirection, long errorCode)
+    public override void Abort(QuicAbortDirection abortDirection, long errorCode)
     {
         if (_disposed)
         {
@@ -508,7 +502,7 @@ public sealed partial class QuicStream
     /// <remarks>
     /// Corresponds to an empty <see href="https://www.rfc-editor.org/rfc/rfc9000.html#frame-stream">STREAM</see> frame with <c>FIN</c> flag set to <c>true</c>.
     /// </remarks>
-    public void CompleteWrites()
+    public override void CompleteWrites()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -675,7 +669,7 @@ public sealed partial class QuicStream
         GCHandle stateHandle = GCHandle.FromIntPtr((IntPtr)context);
 
         // Check if the instance hasn't been collected.
-        if (!stateHandle.IsAllocated || stateHandle.Target is not QuicStream instance)
+        if (!stateHandle.IsAllocated || stateHandle.Target is not MsQuicStream instance)
         {
             if (NetEventSource.Log.IsEnabled())
             {
@@ -775,4 +769,48 @@ public sealed partial class QuicStream
             }
         }
     }
+}
+
+#endregion //MsQuic Implementation
+
+// -----------------------------
+
+public abstract partial class QuicStream
+{
+    public abstract long Id { get; }
+
+    public abstract QuicStreamType Type { get; }
+
+    public abstract Task ReadsClosed { get; }
+
+    public abstract Task WritesClosed { get; }
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public abstract ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, bool completeWrites, CancellationToken cancellationToken = default);
+
+    public abstract void Abort(QuicAbortDirection abortDirection, long errorCode);
+
+    public abstract void CompleteWrites();
+
+    public override ValueTask DisposeAsync()
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Set to true once disposed. Prevents double and/or concurrent disposal.
+    /// </summary>
+    internal bool _disposed;
+
+    internal bool _canRead;
+    internal bool _canWrite;
 }

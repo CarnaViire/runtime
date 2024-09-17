@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 
 namespace System.Net.Quic;
 
-public sealed partial class QuicListener
+public abstract partial class QuicListener
 {
     [SupportedOSPlatformGuard("windows")]
     [SupportedOSPlatformGuard("linux")]

@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 
 namespace System.Net.Quic;
 
-public sealed partial class QuicConnection
+public abstract partial class QuicConnection
 {
     [SupportedOSPlatformGuard("windows")]
     [SupportedOSPlatformGuard("linux")]

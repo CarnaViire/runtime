@@ -9,13 +9,12 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Microsoft.Quic;
-using static Microsoft.Quic.MsQuic;
 
 namespace System.Net.Quic;
 
-public partial class QuicConnection
+internal partial class MsQuicConnection
 {
-    private readonly struct SslConnectionOptions
+    internal readonly struct SslConnectionOptions
     {
         private static readonly Oid s_serverAuthOid = new Oid("1.3.6.1.5.5.7.3.1", null);
         private static readonly Oid s_clientAuthOid = new Oid("1.3.6.1.5.5.7.3.2", null);
@@ -23,7 +22,7 @@ public partial class QuicConnection
         /// <summary>
         /// The connection to which these options belong.
         /// </summary>
-        private readonly QuicConnection _connection;
+        private readonly MsQuicConnection _connection;
         /// <summary>
         /// Determines if the connection is outbound/client or inbound/server.
         /// </summary>
@@ -52,7 +51,7 @@ public partial class QuicConnection
 
         internal string TargetHost => _targetHost;
 
-        public SslConnectionOptions(QuicConnection connection, bool isClient,
+        public SslConnectionOptions(MsQuicConnection connection, bool isClient,
             string targetHost, bool certificateRequired, X509RevocationMode
             revocationMode, RemoteCertificateValidationCallback? validationCallback,
             X509ChainPolicy? certificateChainPolicy)
