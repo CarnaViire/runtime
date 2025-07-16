@@ -105,7 +105,10 @@ namespace Microsoft.Extensions.Http
         {
             ArgumentNullException.ThrowIfNull(name);
 
-            ObjectDisposedException.ThrowIf(_disposed, nameof(DefaultHttpClientFactory));
+            lock (_cleanupTimerLock)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, nameof(DefaultHttpClientFactory));
+            }
 
             HttpMessageHandler handler = CreateHandler(name);
             var client = new HttpClient(handler, disposeHandler: false);
@@ -123,7 +126,10 @@ namespace Microsoft.Extensions.Http
         {
             ArgumentNullException.ThrowIfNull(name);
 
-            ObjectDisposedException.ThrowIf(_disposed, nameof(DefaultHttpClientFactory));
+            lock (_cleanupTimerLock)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, nameof(DefaultHttpClientFactory));
+            }
 
             ActiveHandlerTrackingEntry entry = _activeHandlers.GetOrAdd(name, _entryFactory).Value;
 
@@ -230,6 +236,10 @@ namespace Microsoft.Extensions.Http
         {
             lock (_cleanupTimerLock)
             {
+                if (_disposed)
+                {
+                    return;
+                }
                 _cleanupTimer ??= NonCapturingTimer.Create(_cleanupCallback, this, DefaultCleanupInterval, Timeout.InfiniteTimeSpan);
             }
         }
@@ -247,10 +257,13 @@ namespace Microsoft.Extensions.Http
         // Internal for tests
         internal void CleanupTimer_Tick()
         {
-            // If factory is disposed, don't perform any cleanup
-            if (_disposed)
+            // Check if factory is disposed under the cleanup timer lock
+            lock (_cleanupTimerLock)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
             }
             // Stop any pending timers, we'll restart the timer if there's anything left to process after cleanup.
             //
@@ -325,15 +338,19 @@ namespace Microsoft.Extensions.Http
 
         public void Dispose()
         {
-            if (_disposed)
+            // Set disposed flag under the cleanup timer lock to ensure visibility
+            lock (_cleanupTimerLock)
             {
-                return;
+                if (_disposed)
+                {
+                    return;
+                }
+                _disposed = true;
+
+                // Stop the cleanup timer
+                _cleanupTimer?.Dispose();
+                _cleanupTimer = null;
             }
-
-            _disposed = true;
-
-            // Stop the cleanup timer
-            StopCleanupTimer();
 
             // Stop all active handler timers to prevent more entries being added to _expiredHandlers
             List<IDisposable> disposables = new List<IDisposable>();

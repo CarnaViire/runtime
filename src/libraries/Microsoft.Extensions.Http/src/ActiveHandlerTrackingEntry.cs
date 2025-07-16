@@ -18,10 +18,6 @@ namespace Microsoft.Extensions.Http
         private bool _timerInitialized;
         private Timer? _timer;
         private TimerCallback? _callback;
-        // States for the handler tracking entry
-        private const int Disposed = 1;
-        private const int Expired = 2;
-        private int _disposed;
 
         public ActiveHandlerTrackingEntry(
             string name,
@@ -47,11 +43,6 @@ namespace Microsoft.Extensions.Http
 
         public void StartExpiryTimer(TimerCallback callback)
         {
-            if (_disposed > 0)
-            {
-                return;
-            }
-
             if (Lifetime == Timeout.InfiniteTimeSpan)
             {
                 return; // never expires.
@@ -71,8 +62,7 @@ namespace Microsoft.Extensions.Http
 
             lock (_lock)
             {
-                if (Volatile.Read(ref _timerInitialized) ||
-                    _disposed > 0)
+                if (Volatile.Read(ref _timerInitialized))
                 {
                     return;
                 }
@@ -86,7 +76,6 @@ namespace Microsoft.Extensions.Http
         private void Timer_Tick()
         {
             Debug.Assert(_callback != null);
-            Debug.Assert(_timer != null || _disposed > 0);
 
             lock (_lock)
             {
@@ -95,12 +84,8 @@ namespace Microsoft.Extensions.Http
                     _timer.Dispose();
                     _timer = null;
 
-                    // Only invoke the callback if we successfully transition from 0 to Expired
-                    // This ensures we don't convert to expired if already disposed
-                    if (Interlocked.CompareExchange(ref _disposed, Expired, 0) == 0)
-                    {
-                        _callback(this);
-                    }
+                    // Timer expired - invoke the callback to move this to expired handlers
+                    _callback(this);
                 }
             }
         }
@@ -109,30 +94,38 @@ namespace Microsoft.Extensions.Http
         {
             lock (_lock)
             {
-                _timer?.Dispose();
-                _timer = null;
+                if (_timer != null)
+                {
+                    _timer.Dispose();
+                    _timer = null;
+                }
             }
         }
 
         public void Dispose()
         {
-            // Try to transition from 0 to Disposed state
-            // If already in another state (Expired), do nothing further with handlers
-            if (Interlocked.CompareExchange(ref _disposed, Disposed, 0) != 0)
+            lock (_lock)
             {
-                // If the entry was already disposed or expired, exit
-                // If it was expired, the timer has already stopped and
-                // ExpiredHandlerTrackingEntry now owns both handler and scope
-                return;
+                // If timer is already disposed or entry was never initialized, nothing to do
+                if (_timerInitialized && _timer == null)
+                {
+                    return; // Already disposed
+                }
+
+                // Set the timer as initialized in case Dispose happens before timer creation
+                _timerInitialized = true;
+
+                // Stop and dispose the timer if it exists
+                if (_timer != null)
+                {
+                    _timer.Dispose();
+                    _timer = null;
+                }
+
+                // Dispose the inner handler and scope directly instead of invoking callback
+                Handler.InnerHandler?.Dispose();
+                Scope?.Dispose();
             }
-
-            StopTimer();
-
-            // When we're directly disposed (not converted to an expired entry),
-            // we need to dispose the inner handler (not the LifetimeTrackingHttpMessageHandler itself)
-            // and the scope
-            Handler.InnerHandler?.Dispose();
-            Scope?.Dispose();
         }
     }
 }
